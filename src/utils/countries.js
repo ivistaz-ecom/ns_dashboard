@@ -1,4 +1,4 @@
-const countryListAlpha3 = {
+export const countryListAlpha3 = {
     "AFG": "Afghanistan",
     "ALB": "Albania",
     "DZA": "Algeria",

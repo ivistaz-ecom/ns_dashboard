@@ -83,7 +83,7 @@ function setField(company,field,value){
 }
 function getStage(r){const s=stageOverrides[stageKey(r)]||r.stage;return s==='Prospected'?'Email Outreach':s;}
 
-function switchTab(t){
+function activateTab(t){
   curTab=t==='pipeline'?'dashboard':t;
   const activeTab=t==='pipeline'?'pipeline':t;
   document.querySelectorAll('.nav-item[data-tab]').forEach(el=>{
@@ -91,15 +91,35 @@ function switchTab(t){
   });
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   const panelId=t==='pipeline'||t==='dashboard'?'panel-dashboard':'panel-'+t;
-  document.getElementById(panelId).classList.add('active');
+  const panel=document.getElementById(panelId);
+  if(panel)panel.classList.add('active');
   const main=document.getElementById('main-content');
   if(main)main.classList.toggle('view-pipeline',t==='pipeline');
   if(t==='weekly')renderWeekly();
   if(t==='leads'){populateLeadFilters();renderLeads();}
   if(t==='contacts')renderContactsTab();
   if(t==='analytics')renderAnalytics&&renderAnalytics();
-  if(t==='dashboard'||t==='pipeline')renderDashboardCharts();
+  if(t==='dashboard'||t==='pipeline'){
+    if(typeof populate==='function')populate();
+    if(typeof applyFilters==='function')applyFilters();
+    if(typeof renderDashboardCharts==='function')renderDashboardCharts();
+  }
 }
+
+function switchTab(t){
+  const routes={dashboard:'/',pipeline:'/pipeline',weekly:'/weekly',leads:'/leads',analytics:'/analytics',contacts:'/contacts'};
+  const target=routes[t];
+  if(target&&window.location.pathname!==target){
+    if(typeof window.__nsNavigate==='function'){window.__nsNavigate(t);return;}
+    window.location.assign(target);return;
+  }
+  activateTab(t);
+}
+
+window.switchTab=switchTab;
+window.__nsActivateTab=activateTab;
+window.globalSearch=globalSearch;
+window.exportData=exportData;
 
 function globalSearch(q){
   const search=document.getElementById('search');
@@ -255,29 +275,29 @@ function renderTable(){
     const eco=esc(r.company),ect=esc(r.country||'');
     const _noteArr=Array.isArray(notes[nk])?notes[nk]:(notes[nk]?[{text:notes[nk],ts:null}]:[]);
     const note=_noteArr.length?_noteArr[_noteArr.length-1].text:'';
-    const mc=r.mgmt_type==='Inhouse'?'color:#58a6ff':r.mgmt_type==='Outsourced'?'color:#e3b341':'color:#8b949e';
+    const mc=r.mgmt_type==='Inhouse'?'color:#2563eb':r.mgmt_type==='Outsourced'?'color:#d97706':'color:#64748b';
     const _noteCount=Array.isArray(notes[nk])?notes[nk].length:0;
-    const _moreTag=_noteCount>1?'<span style="color:#484f58;font-size:.58rem;margin-left:4px">(+'+(_noteCount-1)+' more)</span>':'';
+    const _moreTag=_noteCount>1?'<span style="color:#64748b;font-size:.58rem;margin-left:4px">(+'+(_noteCount-1)+' more)</span>':'';
     const np=note?'<div class="nprev clickable-note" data-co="'+eco+'" data-ct="'+ect+'" onclick="openNote(this.dataset.co,this.dataset.ct)" title="Click to see all notes">'+esc(note)+_moreTag+'</div>':'';
     const es=getStage(r);
     const isEdited=!!stageOverrides[stageKey(r)];
     const isCustom=!!r._custom;
     const isReadyLead=r._from_lead&&r._lead_status==='Ready to Contact';
-    const addedTag=isCustom?'<span class="custom-tag">Added</span>':r._from_lead?'<span class="custom-tag" style="background:#1e3a5f;color:#79c0ff;border-color:#1e6091">🎯 Lead</span>':'';
+    const addedTag=isCustom?'<span class="custom-tag">Added</span>':r._from_lead?'<span class="custom-tag" style="background:#eff6ff;color:#1d4ed8;border-color:#93c5fd">🎯 Lead</span>':'';
     // Contact info
-    const contactInfo=r._contact_name?`<div style="font-size:.62rem;color:#58a6ff;margin-top:2px">👤 ${esc(r._contact_name)}${r._contact_email?'<br><span style=\"color:#8b949e\">'+esc(r._contact_email)+'</span>':''}${r._contact_phone?'<br><span style=\"color:#8b949e\">'+esc(r._contact_phone)+'</span>':''}</div>`:'<span style="color:#30363d;font-size:.65rem">—</span>';
+    const contactInfo=r._contact_name?`<div style="font-size:.62rem;color:#2563eb;margin-top:2px">👤 ${esc(r._contact_name)}${r._contact_email?'<br><span style=\"color:#64748b\">'+esc(r._contact_email)+'</span>':''}${r._contact_phone?'<br><span style=\"color:#64748b\">'+esc(r._contact_phone)+'</span>':''}</div>`:'<span style="color:#94a3b8;font-size:.65rem">—</span>';
     // Follow-up
     const fu=r._follow_up||followUps[nk]||'';
-    let fuCell='<span style="color:#30363d;font-size:.65rem">—</span>';
+    let fuCell='<span style="color:#94a3b8;font-size:.65rem">—</span>';
     if(fu){
       const fuDate=new Date(fu),today=new Date();today.setHours(0,0,0,0);fuDate.setHours(0,0,0,0);
       const diff=Math.round((fuDate-today)/(1000*60*60*24));
       const fuLabel=fuDate.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
-      const fuStyle=diff<0?'color:#f85149;font-weight:600':diff===0?'color:#e3b341;font-weight:600':'color:#3fb950';
+      const fuStyle=diff<0?'color:#dc2626;font-weight:600':diff===0?'color:#d97706;font-weight:600':'color:#16a34a';
       const fuIcon=diff<0?'🔴 ':diff===0?'🟡 ':'';
-      fuCell='<span style="font-size:.66rem;'+fuStyle+'">'+fuIcon+fuLabel+'</span><button data-co="'+eco+'" onclick="setFollowUp(this.dataset.co,event)" style="display:block;margin-top:2px;background:none;border:none;color:#30363d;cursor:pointer;font-size:.6rem;padding:0" title="Edit follow-up">✏️</button>';
+      fuCell='<span style="font-size:.66rem;'+fuStyle+'">'+fuIcon+fuLabel+'</span><button data-co="'+eco+'" onclick="setFollowUp(this.dataset.co,event)" style="display:block;margin-top:2px;background:none;border:none;color:#94a3b8;cursor:pointer;font-size:.6rem;padding:0" title="Edit follow-up">Edit</button>';
     } else {
-      fuCell='<button data-co="'+eco+'" onclick="setFollowUp(this.dataset.co,event)" style="background:none;border:1px dashed #30363d;color:#484f58;border-radius:4px;padding:2px 6px;cursor:pointer;font-size:.6rem">＋ Set</button>';
+      fuCell='<button data-co="'+eco+'" onclick="setFollowUp(this.dataset.co,event)" style="background:none;border:1px dashed #cbd5e1;color:#64748b;border-radius:4px;padding:2px 6px;cursor:pointer;font-size:.6rem">＋ Set</button>';
     }
     // Last contacted
 
@@ -286,14 +306,14 @@ function renderTable(){
     const allMonths=[...new Set([...baseMonths,...(extraMonths[nk]||[])])].filter(Boolean);
     const curMonth=getField(r,'month')||r.month||'';
     const otherMonths=allMonths.filter(m=>m&&m!==curMonth);
-    const monthDisplay=`<span class="mtag editable" onclick="openMonthPicker(event,'${eco}')" title="Click to edit months">${esc(curMonth||'—')}</span>`+(otherMonths.length?`<span style="font-size:.55rem;color:#484f58;display:block;margin-top:2px">${otherMonths.map(m=>`+${esc(m)}`).join(', ')}</span>`:'');
+    const monthDisplay=`<span class="mtag editable" onclick="openMonthPicker(event,'${eco}')" title="Click to edit months">${esc(curMonth||'—')}</span>`+(otherMonths.length?`<span style="font-size:.55rem;color:#64748b;display:block;margin-top:2px">${otherMonths.map(m=>`+${esc(m)}`).join(', ')}</span>`:'');
 
     return `<tr${es==='Not Interested'?' style="opacity:.55"':''}>
-      <td><span class="cn">${esc(r.company)}</span>${addedTag}<span class="ni${note?' has':''}" onclick="openNote('${eco}','${ect}')">${note?'🗒️':'＋'}</span><span data-co="${eco}" onclick="openContacts(this.dataset.co)" style="cursor:pointer;margin-left:4px;font-size:.65rem;color:${(contacts[nk]&&contacts[nk].length)?'#58a6ff':'#30363d'}" title="Contacts">${(contacts[nk]&&contacts[nk].length)?'👤'+contacts[nk].length:'👤'}</span></td>
+      <td><span class="cn">${esc(r.company)}</span>${addedTag}<span class="ni${note?' has':''}" onclick="openNote('${eco}','${ect}')">${note?'🗒️':'＋'}</span><span data-co="${eco}" onclick="openContacts(this.dataset.co)" style="cursor:pointer;margin-left:4px;font-size:.65rem;color:${(contacts[nk]&&contacts[nk].length)?'#2563eb':'#94a3b8'}" title="Contacts">${(contacts[nk]&&contacts[nk].length)?'👤'+contacts[nk].length:'👤'}</span></td>
       <td><span class="editable-cell" onclick="openFieldEdit(event,'${eco}','country','${esc(getField(r,'country'))}')">${esc(getField(r,'country')||'—')}</span></td>
       <td><span class="editable-cell" onclick="openFieldEdit(event,'${eco}','mgmt_type','${esc(getField(r,'mgmt_type'))}')">${esc(getField(r,'mgmt_type')||'—')}</span></td>
       <td>${monthDisplay}</td>
-      <td><span class="badge ${bc(es)} editable${isEdited?' edited':''}" onclick="openStageDrop(event,'${eco}','${esc(r.month||'custom')}')">${esc(es)}${isEdited?' ✏️':''}</span></td>
+      <td><span class="badge ${bc(es)} editable${isEdited?' edited':''}" onclick="openStageDrop(event,'${eco}','${esc(r.month||'custom')}')">${esc(es)}</span></td>
       <td><span data-co="${eco}" onclick="toggleCall(this.dataset.co)" class="${isCall(nk)?'call-yes':'call-no'}">${isCall(nk)?'📞 Yes':'—'}</span></td>
       <td>${fuCell}</td>
       <td>${np}${note?'':`<button class="add-note-btn" onclick="addNote('${eco}')">＋ Note</button>`}</td>
@@ -360,10 +380,10 @@ function openMonthPicker(event,company){
   const curPrimary=getField(rec||{},'month')||rec&&rec.month||'';
   const allMList=Object.keys(MONTH_ORDER);
   document.getElementById('month-picker-list').innerHTML=allMList.map(m=>`
-    <label style="display:flex;align-items:center;gap:7px;padding:4px 0;cursor:pointer;font-size:.76rem;color:#c9d1d9">
+    <label style="display:flex;align-items:center;gap:7px;padding:4px 0;cursor:pointer;font-size:.76rem;color:#334155">
       <input type="checkbox" value="${m}"${selected.has(m)?' checked':''}
-        style="accent-color:#58a6ff;width:13px;height:13px;cursor:pointer">
-      <span>${m}</span>${m===curPrimary?'<span style="font-size:.6rem;color:#58a6ff;margin-left:4px">(primary)</span>':''}
+        style="accent-color:#008E9C;width:13px;height:13px;cursor:pointer">
+      <span>${m}</span>${m===curPrimary?'<span style="font-size:.6rem;color:#2563eb;margin-left:4px">(primary)</span>':''}
     </label>`).join('');
   const rect=event.target.getBoundingClientRect();
   const list=document.getElementById('month-picker-list');
@@ -476,6 +496,11 @@ function kpiClick(filter){
     }
   }
   applyFilters();
+  const main=document.getElementById('main-content');
+  if(main&&!main.classList.contains('view-pipeline')){
+    if(typeof window.__nsNavigate==='function')window.__nsNavigate('pipeline');
+    else switchTab('pipeline');
+  }
 }
 
 function trendPct(cur,prev){
@@ -673,24 +698,24 @@ function renderAnalytics(){
 
   // 1. Pipeline by Stage
   const stageOrder=['Meeting / Positive','Retargeted','Email Outreach','Not Interested'];
-  const stageCols={'Meeting / Positive':'#3fb950','Retargeted':'#e3b341','Email Outreach':'#58a6ff','Not Interested':'#f85149'};
+  const stageCols={'Meeting / Positive':'#16a34a','Retargeted':'#d97706','Email Outreach':'#008E9C','Not Interested':'#dc2626'};
   const stageCounts={};
   stageOrder.forEach(s=>stageCounts[s]=0);
   cos.forEach(r=>{const s=getStage(r);if(stageCounts[s]!==undefined)stageCounts[s]++;});
-  bars('chart-stage',stageOrder.map(s=>({k:s,v:stageCounts[s]})).filter(d=>d.v>0),k=>stageCols[k]||'#58a6ff');
+  bars('chart-stage',stageOrder.map(s=>({k:s,v:stageCounts[s]})).filter(d=>d.v>0),k=>stageCols[k]||'#008E9C');
 
   // 2. Top Countries (top 12)
   const countryCounts={};
   cos.forEach(r=>{const c=getField(r,'country');if(c){countryCounts[c]=(countryCounts[c]||0)+1;}});
   const topCountries=Object.entries(countryCounts).sort((a,b)=>b[1]-a[1]).slice(0,12).map(([k,v])=>({k,v}));
-  bars('chart-country',topCountries,()=>'#1e6091');
+  bars('chart-country',topCountries,()=>'#008E9C');
 
   // 3. Management Type
   const JUNK_MGMT_A=new Set(['n/a','na','apollo ai','fixed budget','apollo','other','unknown','']);
-  const mgmtCols={'Inhouse':'#58a6ff','Outsourced':'#e3b341','Both':'#bc8cff','Unsure':'#484f58'};
+  const mgmtCols={'Inhouse':'#008E9C','Outsourced':'#d97706','Both':'#7c3aed','Unsure':'#64748b'};
   const mgmtCounts={};
   cos.forEach(r=>{const m=getField(r,'mgmt_type');if(m&&!JUNK_MGMT_A.has(m.toLowerCase().trim()))mgmtCounts[m]=(mgmtCounts[m]||0)+1;});
-  bars('chart-mgmt',Object.entries(mgmtCounts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>({k,v})),k=>mgmtCols[k]||'#484f58');
+  bars('chart-mgmt',Object.entries(mgmtCounts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>({k,v})),k=>mgmtCols[k]||'#64748b');
 
   // 4. Activity by Month
   const monthCounts={};
@@ -776,18 +801,18 @@ function clearContactForm(){
 function renderContactsList(){
   const list=contacts[activeContactKey]||[];
   const div=document.getElementById('contacts-list');
-  if(!list.length){div.innerHTML='<div style="color:#484f58;font-size:.73rem;text-align:center;padding:14px">No contacts added yet</div>';return}
+  if(!list.length){div.innerHTML='<div style="color:#64748b;font-size:.73rem;text-align:center;padding:14px">No contacts added yet</div>';return}
   div.innerHTML=list.map((c,i)=>`
-    <div style="background:#0d1117;border:1px solid #21262d;border-radius:7px;padding:10px 12px;display:flex;justify-content:space-between;align-items:flex-start">
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;padding:10px 12px;display:flex;justify-content:space-between;align-items:flex-start">
       <div>
-        <div style="font-weight:600;color:#e6edf3;font-size:.78rem">${esc(c.name)}</div>
-        ${c.title?`<div style="font-size:.65rem;color:#8b949e">${esc(c.title)}</div>`:''}
-        ${c.email?`<div style="font-size:.66rem;color:#58a6ff;margin-top:3px"><a href="mailto:${esc(c.email)}" style="color:#58a6ff">${esc(c.email)}</a></div>`:''}
-        ${c.phone?`<div style="font-size:.66rem;color:#8b949e">${esc(c.phone)}</div>`:''}
+        <div style="font-weight:600;color:#0f172a;font-size:.78rem">${esc(c.name)}</div>
+        ${c.title?`<div style="font-size:.65rem;color:#64748b">${esc(c.title)}</div>`:''}
+        ${c.email?`<div style="font-size:.66rem;color:#2563eb;margin-top:3px"><a href="mailto:${esc(c.email)}" style="color:#2563eb">${esc(c.email)}</a></div>`:''}
+        ${c.phone?`<div style="font-size:.66rem;color:#64748b">${esc(c.phone)}</div>`:''}
       </div>
       <div style="display:flex;gap:5px;margin-left:10px">
-        <button onclick="editContact(${i})" style="background:none;border:1px solid #30363d;color:#8b949e;padding:3px 8px;border-radius:5px;cursor:pointer;font-size:.65rem">✏️</button>
-        <button onclick="deleteContact(${i})" style="background:none;border:1px solid #f85149;color:#f85149;padding:3px 8px;border-radius:5px;cursor:pointer;font-size:.65rem">✕</button>
+        <button onclick="editContact(${i})" style="background:none;border:1px solid #cbd5e1;color:#64748b;padding:3px 8px;border-radius:5px;cursor:pointer;font-size:.65rem">Edit</button>
+        <button onclick="deleteContact(${i})" style="background:none;border:1px solid #f85149;color:#dc2626;padding:3px 8px;border-radius:5px;cursor:pointer;font-size:.65rem">✕</button>
       </div>
     </div>`).join('');
 }
@@ -803,7 +828,7 @@ function editContact(idx){
 }
 function saveContact(){
   const name=document.getElementById('ct-name').value.trim();
-  if(!name){document.getElementById('ct-name').style.borderColor='#f85149';setTimeout(()=>document.getElementById('ct-name').style.borderColor='',1200);return}
+  if(!name){document.getElementById('ct-name').style.borderColor='#dc2626';setTimeout(()=>document.getElementById('ct-name').style.borderColor='',1200);return}
   const entry={name,title:document.getElementById('ct-title').value.trim(),email:document.getElementById('ct-email').value.trim(),phone:document.getElementById('ct-phone').value.trim()};
   if(!contacts[activeContactKey])contacts[activeContactKey]=[];
   if(editContactIdx>=0)contacts[activeContactKey][editContactIdx]=entry;
@@ -864,13 +889,13 @@ function renderContactsTab(){
     const eco=esc(r.company);
     return `<tr>
       <td><span class="cn" style="font-size:.76rem">${esc(r.company)}</span></td>
-      <td style="color:#8b949e;font-size:.74rem">${esc(country||'—')}</td>
+      <td style="color:#64748b;font-size:.74rem">${esc(country||'—')}</td>
       <td><span class="badge ${bc(es)}" style="font-size:.6rem">${esc(es)}</span></td>
-      <td style="font-weight:600;font-size:.76rem;color:#e6edf3">${c?esc(c.name):'<span style="color:#30363d">—</span>'}</td>
-      <td style="color:#8b949e;font-size:.74rem">${c?esc(c.title||'—'):'<span style="color:#30363d">—</span>'}</td>
-      <td style="font-size:.73rem">${c&&c.email?`<a href="mailto:${esc(c.email)}" style="color:#58a6ff;text-decoration:none">${esc(c.email)}</a>`:'<span style="color:#30363d">—</span>'}</td>
-      <td style="color:#8b949e;font-size:.74rem">${c?esc(c.phone||'—'):'<span style="color:#30363d">—</span>'}</td>
-      <td><button data-co="${eco}" onclick="openContacts(this.dataset.co)" style="background:#21262d;border:1px solid #30363d;color:#8b949e;border-radius:5px;padding:3px 8px;font-size:.65rem;cursor:pointer">${c?'✏️ Edit':'＋ Add'}</button></td>
+      <td style="font-weight:600;font-size:.76rem;color:#0f172a">${c?esc(c.name):'<span style="color:#94a3b8">—</span>'}</td>
+      <td style="color:#64748b;font-size:.74rem">${c?esc(c.title||'—'):'<span style="color:#94a3b8">—</span>'}</td>
+      <td style="font-size:.73rem">${c&&c.email?`<a href="mailto:${esc(c.email)}" style="color:#2563eb;text-decoration:none">${esc(c.email)}</a>`:'<span style="color:#94a3b8">—</span>'}</td>
+      <td style="color:#64748b;font-size:.74rem">${c?esc(c.phone||'—'):'<span style="color:#94a3b8">—</span>'}</td>
+      <td><button data-co="${eco}" onclick="openContacts(this.dataset.co)" style="background:#f1f5f9;border:1px solid #cbd5e1;color:#64748b;border-radius:5px;padding:3px 8px;font-size:.65rem;cursor:pointer">${c?'Edit':'＋ Add'}</button></td>
     </tr>`;
   }).join('');
   document.getElementById('ct-pinfo').textContent=`${start+1}–${Math.min(start+CT_PER,total)} of ${total}`;
@@ -930,7 +955,7 @@ function openAddCompany(prefill){
 function closeCoModal(){document.getElementById('co-modal').classList.remove('open')}
 function saveCompany(){
   const name=document.getElementById('co-name').value.trim();
-  if(!name){document.getElementById('co-name').style.borderColor='#f85149';setTimeout(()=>document.getElementById('co-name').style.borderColor='',1200);return}
+  if(!name){document.getElementById('co-name').style.borderColor='#dc2626';setTimeout(()=>document.getElementById('co-name').style.borderColor='',1200);return}
   const entry={
     company:name,country:document.getElementById('co-country').value.trim(),
     mgmt_type:document.getElementById('co-mgmt').value,
@@ -976,13 +1001,13 @@ function renderNoteHistory(key){
   migrateNote(key);
   const entries=notes[key]||[];
   const hist=document.getElementById('note-history');
-  if(!entries.length){hist.innerHTML='<div style="color:#484f58;font-size:.72rem;text-align:center;padding:10px">No notes yet</div>';return}
+  if(!entries.length){hist.innerHTML='<div style="color:#64748b;font-size:.72rem;text-align:center;padding:10px">No notes yet</div>';return}
   hist.innerHTML=[...entries].reverse().map((e,ri)=>{
     const realIdx=entries.length-1-ri;
-    return `<div style="background:#0d1117;border:1px solid #21262d;border-radius:7px;padding:9px 11px;position:relative">
-      ${e.ts?`<div style="font-size:.6rem;color:#484f58;margin-bottom:4px">${e.ts}</div>`:''}
-      <div style="font-size:.73rem;color:#c9d1d9;white-space:pre-wrap">${esc(e.text)}</div>
-      <button onclick="deleteNote(${realIdx})" title="Delete note" style="position:absolute;top:6px;right:8px;background:none;border:none;color:#484f58;cursor:pointer;font-size:.7rem;padding:0">✕</button>
+    return `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;padding:9px 11px;position:relative">
+      ${e.ts?`<div style="font-size:.6rem;color:#64748b;margin-bottom:4px">${e.ts}</div>`:''}
+      <div style="font-size:.73rem;color:#334155;white-space:pre-wrap">${esc(e.text)}</div>
+      <button onclick="deleteNote(${realIdx})" title="Delete note" style="position:absolute;top:6px;right:8px;background:none;border:none;color:#64748b;cursor:pointer;font-size:.7rem;padding:0">✕</button>
     </div>`;
   }).join('');
 }
@@ -1012,12 +1037,25 @@ function saveNote(){
   document.getElementById('note-text').value='';
   saveNotes();renderNoteHistory(activeNoteKey);renderTable();
 }
-document.getElementById('note-modal').addEventListener('click',function(e){if(e.target===this)closeNote()});
-document.getElementById('co-modal').addEventListener('click',function(e){if(e.target===this)closeCoModal()});
-document.getElementById('lead-modal').addEventListener('click',function(e){if(e.target===this)closeLeadModal()});
-document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){closeNote();closeCoModal();closeLeadModal();document.getElementById('stage-drop').classList.remove('open')}
-});
+function bindOnce(id, event, handler){
+  const el=document.getElementById(id);
+  if(!el||el.dataset.nsBound==='1')return;
+  el.dataset.nsBound='1';
+  el.addEventListener(event,handler);
+}
+bindOnce('note-modal','click',function(e){if(e.target===this)closeNote()});
+bindOnce('co-modal','click',function(e){if(e.target===this)closeCoModal()});
+bindOnce('lead-modal','click',function(e){if(e.target===this)closeLeadModal()});
+if(!window.__nsKeydownBound){
+  window.__nsKeydownBound=true;
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'){
+      closeNote();closeCoModal();closeLeadModal();
+      const sd=document.getElementById('stage-drop');
+      if(sd)sd.classList.remove('open');
+    }
+  });
+}
 
 // WEEKLY TRACKER
 const TYPE_ICON={call:'📞',email:'📧',whatsapp:'💬',linkedin:'🔗',note:'📌','follow-up':'🔁'};
@@ -1053,16 +1091,16 @@ function renderWeekly(){
         <div class="ce-icon">${TYPE_ICON[c.type]||'📋'}</div>
         <div class="ce-body">
           <div class="ce-hdr">
-            ${c.company?`<span class="ce-co">${esc(c.company)}</span>`:'<span style="color:#8b949e;font-size:.75rem">General</span>'}
+            ${c.company?`<span class="ce-co">${esc(c.company)}</span>`:'<span style="color:#64748b;font-size:.75rem">General</span>'}
             <span class="ce-type ct-${c.type}">${TYPE_LABEL[c.type]||c.type}</span>
             <span class="ce-ts">${c.timeStr||''}</span>
           </div>
           <div class="ce-txt">${esc(c.text).replace(/\n/g,'<br>')}</div>
         </div>
-        <button onclick="openEditComm(${c.id})" style="background:none;border:none;color:#8b949e;cursor:pointer;font-size:.8rem;padding:2px 5px" title="Edit">✏️</button>
+        <button onclick="openEditComm(${c.id})" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:.8rem;padding:2px 5px" title="Edit">Edit</button>
         <button class="del-ce" onclick="deleteComm(${c.id})">✕</button>
       </div>`).join('');
-    return `<div style="margin-bottom:4px"><div style="font-size:.66rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;padding:4px 0 5px">${dl}</div>${entries}</div>`;
+    return `<div style="margin-bottom:4px"><div style="font-size:.66rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;padding:4px 0 5px">${dl}</div>${entries}</div>`;
   }).join('');
 }
 function addComm(){
@@ -1070,7 +1108,7 @@ function addComm(){
   const type=document.getElementById('cf-type').value;
   const text=document.getElementById('cf-text').value.trim();
   const date=document.getElementById('cf-date').value;
-  if(!text){document.getElementById('cf-text').style.borderColor='#f85149';setTimeout(()=>document.getElementById('cf-text').style.borderColor='',1200);return}
+  if(!text){document.getElementById('cf-text').style.borderColor='#dc2626';setTimeout(()=>document.getElementById('cf-text').style.borderColor='',1200);return}
   if(editingCommId!==null){
     const idx=comms.findIndex(c=>c.id===editingCommId);
     if(idx>=0)comms[idx]={...comms[idx],company,type,text,date};
@@ -1129,7 +1167,7 @@ function openAddLead(idx){
 function closeLeadModal(){document.getElementById('lead-modal').classList.remove('open')}
 function saveLead(){
   const name=document.getElementById('lead-name').value.trim();
-  if(!name){document.getElementById('lead-name').style.borderColor='#f85149';setTimeout(()=>document.getElementById('lead-name').style.borderColor='',1200);return}
+  if(!name){document.getElementById('lead-name').style.borderColor='#dc2626';setTimeout(()=>document.getElementById('lead-name').style.borderColor='',1200);return}
   const entry={
     id:editingLeadIdx>=0?potentialLeads[editingLeadIdx].id:Date.now(),
     name,country:document.getElementById('lead-country').value.trim(),
@@ -1285,15 +1323,15 @@ function renderLeads(){
     const isPassed=l.status==='Passed';
     const notePreview=l.notes?`<div class="nprev" title="${esc(l.notes)}">${esc(l.notes)}</div>`:'—';
     return `<tr>
-      <td><span class="cn">${esc(l.name)}</span><br><span style="font-size:.63rem;color:#6e7681">Added ${esc(l.added||'')}</span></td>
-      <td style="color:#8b949e;font-size:.71rem">${esc(l.country||'—')}</td>
-      <td style="font-size:.71rem;color:#c9d1d9">${esc(l.contact||'—')}</td>
-      <td style="font-size:.71rem;color:#8b949e">${esc(l.source||'—')}</td>
+      <td><span class="cn">${esc(l.name)}</span><br><span style="font-size:.63rem;color:#64748b">Added ${esc(l.added||'')}</span></td>
+      <td style="color:#64748b;font-size:.71rem">${esc(l.country||'—')}</td>
+      <td style="font-size:.71rem;color:#334155">${esc(l.contact||'—')}</td>
+      <td style="font-size:.71rem;color:#64748b">${esc(l.source||'—')}</td>
       <td><span class="badge ${sc} editable" onclick="openLeadStageDrop(event,${l._idx})">${esc(l.status)}</span></td>
       <td>${notePreview}</td>
       <td style="white-space:nowrap">
-        ${!isPassed?`<button onclick="promoteLeadToPipeline(${l._idx})" style="background:#1e6091;border:none;color:#fff;padding:3px 8px;border-radius:5px;cursor:pointer;font-size:.65rem;font-weight:600;margin-right:4px">→ Pipeline</button>`:'<span style="font-size:.65rem;color:#3fb950;margin-right:6px">✓ Added</span>'}
-        <button onclick="openAddLead(${l._idx})" style="background:#21262d;border:1px solid #30363d;color:#8b949e;padding:3px 7px;border-radius:5px;cursor:pointer;font-size:.65rem">✏️</button>
+        ${!isPassed?`<button onclick="promoteLeadToPipeline(${l._idx})" style="background:#008E9C;border:none;color:#fff;padding:3px 8px;border-radius:5px;cursor:pointer;font-size:.65rem;font-weight:600;margin-right:4px">→ Pipeline</button>`:'<span style="font-size:.65rem;color:#16a34a;margin-right:6px">✓ Added</span>'}
+        <button onclick="openAddLead(${l._idx})" style="background:#f1f5f9;border:1px solid #cbd5e1;color:#64748b;padding:3px 7px;border-radius:5px;cursor:pointer;font-size:.65rem">Edit</button>
       </td>
     </tr>`;
   }).join('');
@@ -1418,4 +1456,8 @@ function importData(e){
 populate();
 applyFilters();
 renderDashboardCharts();
-document.getElementById('cf-date').value=new Date().toISOString().slice(0,10);
+const cfDate=document.getElementById('cf-date');
+if(cfDate)cfDate.value=new Date().toISOString().slice(0,10);
+
+window.exportData=exportData;
+window.globalSearch=globalSearch;
