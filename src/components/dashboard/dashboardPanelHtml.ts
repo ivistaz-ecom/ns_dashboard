@@ -89,13 +89,13 @@ export const dashboardPanelHtml = `
     <div class="scroll" id="pipeline-scroll">
       <table>
         <thead><tr>
-          <th onclick="sortBy('company')">Company ↕</th>
-          <th onclick="sortBy('country')">Country ↕</th>
-          <th onclick="sortBy('mgmt_type')">Type ↕</th>
-          <th onclick="sortBy('month')">Month ↕</th>
-          <th onclick="sortBy('stage')">Stage ↕ <span class="th-hint">▾ click to edit</span></th>
+          <th onclick="sortBy('company')">Company <span class="sort-icon">↕</span></th>
+          <th onclick="sortBy('country')">Country <span class="sort-icon">↕</span></th>
+          <th onclick="sortBy('mgmt_type')">Type <span class="sort-icon">↕</span></th>
+          <th onclick="sortBy('month')">Month <span class="sort-icon">↕</span></th>
+          <th onclick="sortBy('stage')">Stage <span class="sort-icon">↕</span> <span class="th-hint">▾ click to edit</span></th>
           <th>Call</th>
-          <th onclick="sortBy('_follow_up')">Follow-up ↕</th>
+          <th onclick="sortBy('_follow_up')">Follow-up <span class="sort-icon">↕</span></th>
           <th>Notes</th>
           <th>Actions</th>
         </tr></thead>

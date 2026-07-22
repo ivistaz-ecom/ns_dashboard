@@ -11,8 +11,10 @@ export const modalsHtml = `
 <!-- STAGE DROPDOWN -->
 <div id="stage-drop" class="stage-drop">
   <div class="sd-hint">Change Stage</div>
+  <div class="sd-item" onclick="setStage('Prospected')"><div class="sd-dot" style="background:#64748b"></div>Prospected</div>
   <div class="sd-item" onclick="setStage('Email Outreach')"><div class="sd-dot" style="background:#2563eb"></div>Email Outreach</div>
   <div class="sd-item" onclick="setStage('Retargeted')"><div class="sd-dot" style="background:#d97706"></div>Retargeted</div>
+  <div class="sd-item" onclick="setStage('Call')"><div class="sd-dot" style="background:#7c3aed"></div>Call</div>
   <div class="sd-item" onclick="setStage('Meeting / Positive')"><div class="sd-dot" style="background:#16a34a"></div>Meeting / Positive</div>
   <div class="sd-item" onclick="setStage('Not Interested')"><div class="sd-dot" style="background:#dc2626"></div>Not Interested</div>
 </div>
@@ -21,12 +23,18 @@ export const modalsHtml = `
 <div class="overlay" id="co-modal">
   <div class="modal">
     <h3 id="co-modal-title">Add Company to Pipeline</h3>
-    <div class="mrow"><div class="half"><div class="mlbl">Company Name *</div><input type="text" id="co-name" placeholder="e.g. Maersk Line"></div><div class="half"><div class="mlbl">Country</div><input type="text" id="co-country" placeholder="e.g. Denmark"></div></div>
-    <div class="mrow"><div class="half"><div class="mlbl">Management Type</div><select id="co-mgmt"><option value="">—</option><option value="Inhouse">Inhouse</option><option value="Outsourced">Outsourced</option><option value="Both">Both</option><option value="Unsure">Unsure</option></select></div><div class="half"><div class="mlbl">Stage</div><select id="co-stage"><option value="Email Outreach">Email Outreach</option><option value="Retargeted">Retargeted</option><option value="Call">Call</option><option value="Meeting / Positive">Meeting / Positive</option><option value="Not Interested">Not Interested</option><option value="Prospected">Prospected</option></select></div></div>
-    <div class="mrow"><div class="half"><div class="mlbl">Month</div><select id="co-month"><option value="Jul 2026">Jul 2026</option><option value="Jun 2026">Jun 2026</option><option value="May 2026">May 2026</option><option value="Apr 2026">Apr 2026</option><option value="Mar 2026">Mar 2026</option><option value="Feb 2026">Feb 2026</option><option value="Jan 2026">Jan 2026</option></select></div><div class="half"><div class="mlbl">Status Detail</div><input type="text" id="co-status" placeholder="e.g. Email Outreach sent"></div></div>
+    <div id="co-code-row" style="display:none;margin:-6px 0 12px;font-size:.68rem;color:#94a3b8;font-family:monospace"></div>
+    <div class="mrow"><div class="half"><div class="mlbl">Company Name *</div><input type="text" id="co-name" placeholder="e.g. Maersk Line"></div><div class="half"><div class="mlbl">Country</div><select id="co-country"><option value="">—</option></select></div></div>
+    <div class="mrow"><div class="half"><div class="mlbl">Management Type</div><select id="co-mgmt"><option value="">—</option></select></div><div class="half"><div class="mlbl">Stage</div><select id="co-stage"></select></div></div>
+    <div class="mrow"><div class="half"><div class="mlbl">Month</div><select id="co-month"></select></div><div class="half"><div class="mlbl">Status Detail</div><input type="text" id="co-status" placeholder="e.g. Email Outreach sent"></div></div>
+    <div class="mrow"><div style="width:100%;font-size:.68rem;color:#94a3b8">To tag additional outreach months for this company, use the month tag in the Pipeline table (click it directly) rather than here.</div></div>
     <div class="mrow"><div class="half"><div class="mlbl">Contact Person Name</div><input type="text" id="co-contact-name" placeholder="e.g. John Smith"></div><div class="half"><div class="mlbl">Contact Email</div><input type="email" id="co-contact-email" placeholder="e.g. john@company.com"></div></div>
     <div class="mrow"><div class="half"><div class="mlbl">Contact Phone</div><input type="text" id="co-contact-phone" placeholder="e.g. +1 555 000 0000"></div><div class="half"><div class="mlbl">Follow-up Date</div><input type="date" id="co-followup"></div></div>
-    <div class="mrow"><div style="width:100%"><div class="mlbl">Notes</div><textarea id="co-notes" placeholder="Any notes about this company..."></textarea></div></div>
+    <div class="mrow"><div style="width:100%">
+      <div class="mlbl">Notes</div>
+      <div id="co-notes-preview" style="display:none;max-height:110px;overflow-y:auto;background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;padding:8px 10px;margin-bottom:6px;font-size:.72rem;color:#334155;white-space:pre-wrap"></div>
+      <textarea id="co-notes" placeholder="Add a new note..."></textarea>
+    </div></div>
     <div class="mbtns">
       <button class="bcancel" onclick="closeCoModal()">Cancel</button>
       <button class="bsave" onclick="saveCompany()">Save</button>
@@ -70,18 +78,11 @@ export const modalsHtml = `
 </div>
 
 <!-- FIELD EDIT POPOVER -->
-<div id="field-edit-pop" style="display:none;position:fixed;z-index:9999;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:12px;box-shadow:0 8px 24px rgba(15,23,42,.12);min-width:200px">
+<div id="field-edit-pop" style="display:none;position:fixed;z-index:9999;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:12px;box-shadow:0 8px 24px rgba(15,23,42,.12);min-width:220px">
   <div id="field-edit-label" style="font-size:.68rem;color:#64748b;margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.05em"></div>
-  <input id="field-edit-inp" type="text" style="background:#f8fafc;border:1px solid #e2e8f0;color:#0f172a;border-radius:6px;padding:5px 8px;font-size:.76rem;width:100%;box-sizing:border-box;outline:none" onkeydown="if(event.key==='Enter')saveFieldEdit()">
-  <div id="field-edit-mgmt-btns" style="display:none;flex-direction:column;gap:5px">
-    <button onclick="pickMgmt('')" style="background:#f1f5f9;border:1px solid #e2e8f0;color:#64748b;border-radius:6px;padding:6px 10px;font-size:.76rem;cursor:pointer;text-align:left">— Clear</button>
-    <button onclick="pickMgmt('Inhouse')" style="background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8;border-radius:6px;padding:6px 10px;font-size:.76rem;cursor:pointer;text-align:left">Inhouse</button>
-    <button onclick="pickMgmt('Outsourced')" style="background:#fffbeb;border:1px solid #fcd34d;color:#b45309;border-radius:6px;padding:6px 10px;font-size:.76rem;cursor:pointer;text-align:left">Outsourced</button>
-    <button onclick="pickMgmt('Both')" style="background:#f5f3ff;border:1px solid #c4b5fd;color:#6d28d9;border-radius:6px;padding:6px 10px;font-size:.76rem;cursor:pointer;text-align:left">Both</button>
-    <button onclick="pickMgmt('Unsure')" style="background:#f1f5f9;border:1px solid #e2e8f0;color:#64748b;border-radius:6px;padding:6px 10px;font-size:.76rem;cursor:pointer;text-align:left">Unsure</button>
-  </div>
-  <div id="field-edit-inp-row" style="display:flex;gap:6px;margin-top:8px">
-    <button onclick="saveFieldEdit()" style="flex:1;background:var(--accent);color:#fff;border:none;border-radius:5px;padding:5px;cursor:pointer;font-size:.72rem;font-weight:600">Save</button>
+  <select id="field-edit-select" style="background:#f8fafc;border:1px solid #e2e8f0;color:#0f172a;border-radius:6px;padding:6px 8px;font-size:.76rem;width:100%;box-sizing:border-box;outline:none" onchange="pickFieldEditValue(this.value)">
+  </select>
+  <div style="display:flex;gap:6px;margin-top:8px">
     <button onclick="document.getElementById('field-edit-pop').style.display='none'" style="flex:1;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:5px;padding:5px;cursor:pointer;font-size:.72rem">Cancel</button>
   </div>
 </div>
@@ -122,7 +123,7 @@ export const modalsHtml = `
   <input type="date" id="fu-picker">
   <div class="fu-btns">
     <button onclick="saveFU()" style="background:var(--accent);color:#fff">Save</button>
-    <button onclick="followUps[fuTarget]&&(delete followUps[fuTarget],saveFollowUps(),document.getElementById('fu-pop').style.display='none',renderTable(),updateKPIs())" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5">Clear</button>
+    <button onclick="clearFU()" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5">Clear</button>
     <button onclick="document.getElementById('fu-pop').style.display='none'" style="background:#f1f5f9;color:#64748b">Cancel</button>
   </div>
 </div>

@@ -1,5 +1,25 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Backend API
+
+This dashboard talks to a separate Core PHP + MySQL API (delivered as its own
+`/api` bundle — see that project's README for endpoints).
+
+1. Copy `.env.example` to `.env.local` and set `NEXT_PUBLIC_API_URL` to where
+   you deployed the `/api` folder (no trailing slash), e.g.:
+   ```
+   NEXT_PUBLIC_API_URL=https://your-domain.com/api
+   ```
+2. `AppShell.tsx` injects that value as `window.__NS_API_BASE__` and loads
+   `public/js/api-client.js`, which exposes `window.NsApi.*` (listCompanies,
+   createLead, convertLead, getAnalytics, etc.) for calling the backend.
+3. **Current status:** `public/js/dashboard.js` still reads/writes
+   `localStorage` for its data (companies, leads, contacts, notes,
+   follow-ups) — `window.NsApi` is wired up and ready to call, but swapping
+   dashboard.js's `save*`/load functions over to it is a follow-up pass
+   (that file keys almost everything off company name rather than a DB id,
+   so it needs to go function-by-function rather than a single find/replace).
+
 ## Getting Started
 
 First, run the development server:
