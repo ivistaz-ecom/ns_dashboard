@@ -2,9 +2,12 @@
 
 import Image from "next/image"
 import Link from "next/link"
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import type { ReactNode } from "react"
 import type { NavTab } from "@/config/nav"
 import { navItems } from "@/config/nav"
+import { LookupsManager } from "@/components/layout/LookupsManager"
 
 const icons: Record<NavTab, ReactNode> = {
   dashboard: (
@@ -53,6 +56,23 @@ const icons: Record<NavTab, ReactNode> = {
 }
 
 export function Sidebar({ activeTab }: { activeTab: NavTab }) {
+  const router = useRouter()
+  const [userName, setUserName] = useState("")
+  const [userRole, setUserRole] = useState("")
+
+  useEffect(() => {
+    const stored = window.NsApi?.getStoredUser()
+    if (stored) {
+      setUserName(stored.name)
+      setUserRole(stored.role)
+    }
+  }, [])
+
+  async function handleLogout() {
+    await window.NsApi?.logout()
+    router.replace("/login")
+  }
+
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
@@ -79,16 +99,26 @@ export function Sidebar({ activeTab }: { activeTab: NavTab }) {
           </Link>
         ))}
       </nav>
+      <LookupsManager />
       <div className="sidebar-footer">
         <div className="sidebar-user">
-          <div className="user-avatar">J</div>
+          <div className="user-avatar">{userName ? userName[0].toUpperCase() : "?"}</div>
           <div className="user-info">
-            <div className="user-name">Jerry</div>
-            <div className="user-role">BD Manager</div>
+            <div className="user-name">{userName || "—"}</div>
+            <div className="user-role">{userRole || ""}</div>
           </div>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
+          <button
+            type="button"
+            onClick={handleLogout}
+            title="Log out"
+            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+          </button>
         </div>
       </div>
     </aside>
