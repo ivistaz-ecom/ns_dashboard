@@ -54,18 +54,27 @@ export default function LoginPage() {
 
   if (checking) {
     return (
-      <div className="flex h-full items-center justify-center bg-slate-50">
+      <div className="flex h-full items-center justify-center bg-slate-50 ">
         <div className="text-sm text-slate-400">Checking session…</div>
       </div>
     )
   }
 
   return (
-    <div className="flex h-full items-center justify-center bg-slate-50 px-4">
-      <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
-        <div className="mb-6 flex flex-col items-center gap-2">
-          <Image src="/images/logo.webp" alt="Nautilus Shipping" width={140} height={42} priority />
-          <div className="text-sm text-slate-500">Business Development Dashboard</div>
+    <div className="flex h-full items-center justify-center bg-slate-50 px-6 py-10">
+      <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white shadow-sm p-4">
+        <div className="mb-6 flex flex-col items-center gap-6 text-left">
+          <Image
+            src="/images/logo.webp"
+            alt="Nautilus Shipping"
+            width={252}
+            height={108}
+            priority
+            className="h-auto w-[160px] max-w-full object-contain object-left"
+          />
+          <div className="text-sm text-slate-500">
+            Business Development Dashboard
+          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">

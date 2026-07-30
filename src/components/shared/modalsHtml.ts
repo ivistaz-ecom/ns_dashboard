@@ -1,22 +1,7 @@
 export const modalsHtml = `
-<!-- LEAD STAGE DROPDOWN -->
-<div id="lead-stage-drop" class="stage-drop">
-  <div class="sd-hint">Change Stage</div>
-  <div class="sd-item" onclick="setLeadStage('New')"><div class="sd-dot" style="background:#64748b"></div>New</div>
-  <div class="sd-item" onclick="setLeadStage('Researching')"><div class="sd-dot" style="background:#7c3aed"></div>Researching</div>
-  <div class="sd-item" onclick="setLeadStage('Ready to Contact')"><div class="sd-dot" style="background:#16a34a"></div>Ready to Contact</div>
-  <div class="sd-item" onclick="setLeadStage('Passed')"><div class="sd-dot" style="background:#d97706"></div>Added to Pipeline</div>
-</div>
-
-<!-- STAGE DROPDOWN -->
+<!-- STAGE DROPDOWN (options filled from active Dashboard stages) -->
 <div id="stage-drop" class="stage-drop">
   <div class="sd-hint">Change Stage</div>
-  <div class="sd-item" onclick="setStage('Prospected')"><div class="sd-dot" style="background:#64748b"></div>Prospected</div>
-  <div class="sd-item" onclick="setStage('Email Outreach')"><div class="sd-dot" style="background:#2563eb"></div>Email Outreach</div>
-  <div class="sd-item" onclick="setStage('Retargeted')"><div class="sd-dot" style="background:#d97706"></div>Retargeted</div>
-  <div class="sd-item" onclick="setStage('Call')"><div class="sd-dot" style="background:#7c3aed"></div>Call</div>
-  <div class="sd-item" onclick="setStage('Meeting / Positive')"><div class="sd-dot" style="background:#16a34a"></div>Meeting / Positive</div>
-  <div class="sd-item" onclick="setStage('Not Interested')"><div class="sd-dot" style="background:#dc2626"></div>Not Interested</div>
 </div>
 
 <!-- ADD/EDIT COMPANY MODAL -->
@@ -24,9 +9,62 @@ export const modalsHtml = `
   <div class="modal">
     <h3 id="co-modal-title">Add Company to Pipeline</h3>
     <div id="co-code-row" style="display:none;margin:-6px 0 12px;font-size:.68rem;color:#94a3b8;font-family:monospace"></div>
-    <div class="mrow"><div class="half"><div class="mlbl">Company Name *</div><input type="text" id="co-name" placeholder="e.g. Maersk Line"></div><div class="half"><div class="mlbl">Country</div><select id="co-country"><option value="">—</option></select></div></div>
-    <div class="mrow"><div class="half"><div class="mlbl">Management Type</div><select id="co-mgmt"><option value="">—</option></select></div><div class="half"><div class="mlbl">Stage</div><select id="co-stage"></select></div></div>
-    <div class="mrow"><div class="half"><div class="mlbl">Month</div><select id="co-month"></select></div><div class="half"><div class="mlbl">Status Detail</div><input type="text" id="co-status" placeholder="e.g. Email Outreach sent"></div></div>
+    <div class="mrow">
+      <div class="half">
+        <div class="mlbl">Company Name *</div>
+        <input type="text" id="co-name" placeholder="e.g. Maersk Line">
+      </div>
+      <div class="half">
+        <div class="mlbl">Country</div>
+        <div class="ss-wrap" id="co-form-country-ss">
+          <input type="hidden" id="co-form-country" value="">
+          <button type="button" class="ss-btn" id="co-form-country-btn" onclick="toggleCoFormCountryDrop(event)" aria-haspopup="listbox" aria-expanded="false">
+            <span id="co-form-country-label">—</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="ss-drop" id="co-form-country-drop" hidden>
+            <div class="ss-search">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" id="co-form-country-search" placeholder="Search countries..." autocomplete="off" oninput="filterCoFormCountryOptions()">
+            </div>
+            <div class="ss-list" id="co-form-country-list" role="listbox"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="mrow"><div class="half"><div class="mlbl">Management Type</div>
+        <div class="ss-wrap" id="co-form-mgmt-ss">
+          <input type="hidden" id="co-form-mgmt" value="">
+          <button type="button" class="ss-btn" id="co-form-mgmt-btn" onclick="toggleCoFormMgmtDrop(event)" aria-haspopup="listbox" aria-expanded="false">
+            <span id="co-form-mgmt-label">—</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="ss-drop" id="co-form-mgmt-drop" hidden>
+            <div class="ss-search">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" id="co-form-mgmt-search" placeholder="Search types..." autocomplete="off" oninput="filterCoFormMgmtOptions()">
+            </div>
+            <div class="ss-list" id="co-form-mgmt-list" role="listbox"></div>
+          </div>
+        </div>
+      </div><div class="half"><div class="mlbl">Stage</div><select id="co-stage"></select></div></div>
+    <div class="mrow"><div class="half"><div class="mlbl">Month</div>
+      <div class="ss-wrap month-filter-wrap" id="co-month-ss">
+        <input type="hidden" id="co-month" value="">
+        <button type="button" class="ss-btn" id="co-month-btn" onclick="toggleFormMonthDrop('co', event)" aria-haspopup="dialog" aria-expanded="false">
+          <span id="co-month-label">—</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="ss-drop month-filter-drop" id="co-month-drop" hidden>
+          <div class="month-filter-head">
+            <button type="button" class="month-filter-nav" id="co-month-prev" onclick="shiftFormMonthYear('co', -1, event)" aria-label="Previous year">‹</button>
+            <div class="month-filter-year" id="co-month-year"></div>
+            <button type="button" class="month-filter-nav" id="co-month-next" onclick="shiftFormMonthYear('co', 1, event)" aria-label="Next year">›</button>
+          </div>
+          <div class="month-filter-grid" id="co-month-grid" role="listbox" aria-label="Select month"></div>
+        </div>
+      </div>
+    </div><div class="half"><div class="mlbl">Status Detail</div><input type="text" id="co-status" placeholder="e.g. Email Outreach sent"></div></div>
     <div class="mrow"><div style="width:100%;font-size:.68rem;color:#94a3b8">To tag additional outreach months for this company, use the month tag in the Pipeline table (click it directly) rather than here.</div></div>
     <div class="mrow"><div class="half"><div class="mlbl">Contact Person Name</div><input type="text" id="co-contact-name" placeholder="e.g. John Smith"></div><div class="half"><div class="mlbl">Contact Email</div><input type="email" id="co-contact-email" placeholder="e.g. john@company.com"></div></div>
     <div class="mrow"><div class="half"><div class="mlbl">Contact Phone</div><input type="text" id="co-contact-phone" placeholder="e.g. +1 555 000 0000"></div><div class="half"><div class="mlbl">Follow-up Date</div><input type="date" id="co-followup"></div></div>
@@ -46,14 +84,84 @@ export const modalsHtml = `
 <div class="overlay" id="lead-modal">
   <div class="modal">
     <h3 id="lead-modal-title">Add Potential Lead</h3>
-    <div class="mrow"><div class="half"><div class="mlbl">Company Name *</div><input type="text" id="lead-name" placeholder="e.g. Pacific Carriers"></div><div class="half"><div class="mlbl">Country</div><input type="text" id="lead-country" placeholder="e.g. Singapore"></div></div>
-    <div class="mrow"><div class="half"><div class="mlbl">Contact Person</div><input type="text" id="lead-contact" placeholder="e.g. John Smith, CEO"></div><div class="half"><div class="mlbl">Status</div><select id="lead-status"><option value="New">New</option><option value="Researching">Researching</option><option value="Ready to Contact">Ready to Contact</option></select></div></div>
-    <div class="mrow"><div class="half"><div class="mlbl">Source</div><input type="text" id="lead-source" placeholder="e.g. LinkedIn, Event, Referral"></div><div class="half"><div class="mlbl">Management Type</div><select id="lead-mgmt"><option value="">—</option><option value="Inhouse">Inhouse</option><option value="Outsourced">Outsourced</option></select></div></div>
-    <div class="mrow"><div style="width:100%"><div class="mlbl">Why this lead? Notes</div><textarea id="lead-notes" placeholder="Why are they a potential lead?..."></textarea></div></div>
+    <div class="mrow">
+      <div class="half">
+        <div class="mlbl">Company Name *</div>
+        <input type="text" id="lead-name" placeholder="e.g. Maersk Line">
+      </div>
+      <div class="half">
+        <div class="mlbl">Country</div>
+        <div class="ss-wrap" id="lead-form-country-ss">
+          <input type="hidden" id="lead-form-country" value="">
+          <button type="button" class="ss-btn" id="lead-form-country-btn" onclick="toggleLeadFormCountryDrop(event)" aria-haspopup="listbox" aria-expanded="false">
+            <span id="lead-form-country-label">—</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="ss-drop" id="lead-form-country-drop" hidden>
+            <div class="ss-search">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" id="lead-form-country-search" placeholder="Search countries..." autocomplete="off" oninput="filterLeadFormCountryOptions()">
+            </div>
+            <div class="ss-list" id="lead-form-country-list" role="listbox"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="mrow">
+      <div class="half"><div class="mlbl">Management Type</div>
+        <div class="ss-wrap" id="lead-form-mgmt-ss">
+          <input type="hidden" id="lead-form-mgmt" value="">
+          <button type="button" class="ss-btn" id="lead-form-mgmt-btn" onclick="toggleLeadFormMgmtDrop(event)" aria-haspopup="listbox" aria-expanded="false">
+            <span id="lead-form-mgmt-label">—</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="ss-drop" id="lead-form-mgmt-drop" hidden>
+            <div class="ss-search">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" id="lead-form-mgmt-search" placeholder="Search types..." autocomplete="off" oninput="filterLeadFormMgmtOptions()">
+            </div>
+            <div class="ss-list" id="lead-form-mgmt-list" role="listbox"></div>
+          </div>
+        </div>
+      </div>
+      <div class="half"><div class="mlbl">Stage</div><select id="lead-stage"></select></div>
+    </div>
+    <div class="mrow">
+      <div class="half"><div class="mlbl">Month</div>
+        <div class="ss-wrap month-filter-wrap" id="lead-form-month-ss">
+          <input type="hidden" id="lead-month" value="">
+          <button type="button" class="ss-btn" id="lead-form-month-btn" onclick="toggleFormMonthDrop('lead', event)" aria-haspopup="dialog" aria-expanded="false">
+            <span id="lead-form-month-label">—</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="ss-drop month-filter-drop" id="lead-form-month-drop" hidden>
+            <div class="month-filter-head">
+              <button type="button" class="month-filter-nav" id="lead-form-month-prev" onclick="shiftFormMonthYear('lead', -1, event)" aria-label="Previous year">‹</button>
+              <div class="month-filter-year" id="lead-form-month-year"></div>
+              <button type="button" class="month-filter-nav" id="lead-form-month-next" onclick="shiftFormMonthYear('lead', 1, event)" aria-label="Next year">›</button>
+            </div>
+            <div class="month-filter-grid" id="lead-form-month-grid" role="listbox" aria-label="Select month"></div>
+          </div>
+        </div>
+      </div>
+      <div class="half"><div class="mlbl">Status Detail</div><input type="text" id="lead-status-detail" placeholder="e.g. Email Outreach sent"></div>
+    </div>
+    <div class="mrow"><div style="width:100%;font-size:.68rem;color:#94a3b8">To tag additional outreach months for this company, use the month tag in the Pipeline table (click it directly) rather than here.</div></div>
+    <div class="mrow">
+      <div class="half"><div class="mlbl">Contact Person Name</div><input type="text" id="lead-contact" placeholder="e.g. John Smith"></div>
+      <div class="half"><div class="mlbl">Contact Email</div><input type="email" id="lead-contact-email" placeholder="e.g. john@company.com"></div>
+    </div>
+    <div class="mrow">
+      <div class="half"><div class="mlbl">Contact Phone</div><input type="text" id="lead-contact-phone" placeholder="e.g. +1 555 000 0000"></div>
+      <div class="half"><div class="mlbl">Follow-up Date</div><input type="date" id="lead-followup"></div>
+    </div>
+    <input type="hidden" id="lead-status" value="New">
+    <input type="hidden" id="lead-source" value="">
+    <div class="mrow"><div style="width:100%"><div class="mlbl">Notes</div><textarea id="lead-notes" placeholder="Add a new note..."></textarea></div></div>
     <div class="mbtns">
       <button class="bdanger" id="lead-delete-btn" style="display:none" onclick="deleteLead()">Delete</button>
       <button class="bcancel" onclick="closeLeadModal()">Cancel</button>
-      <button class="bsave" onclick="saveLead()">Save Lead</button>
+      <button class="bsave" onclick="saveLead()">Save</button>
     </div>
   </div>
 </div>
@@ -71,26 +179,30 @@ export const modalsHtml = `
       <textarea id="note-text" placeholder="Type your note..." style="min-height:70px"></textarea>
       <div class="mbtns">
         <button class="bcancel" onclick="closeNote()">Close</button>
-        <button class="bsave" onclick="saveNote()">+ Add Note</button>
+        <button class="bsave" id="note-save-btn" onclick="saveNote()" style="display:none">Save Notes</button>
       </div>
     </div>
   </div>
 </div>
 
 <!-- FIELD EDIT POPOVER -->
-<div id="field-edit-pop" style="display:none;position:fixed;z-index:9999;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:12px;box-shadow:0 8px 24px rgba(15,23,42,.12);min-width:220px">
+<div id="field-edit-pop" style="display:none;position:fixed;z-index:9999;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:12px;box-shadow:0 8px 24px rgba(15,23,42,.12);min-width:240px;width:260px">
   <div id="field-edit-label" style="font-size:.68rem;color:#64748b;margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.05em"></div>
-  <select id="field-edit-select" style="background:#f8fafc;border:1px solid #e2e8f0;color:#0f172a;border-radius:6px;padding:6px 8px;font-size:.76rem;width:100%;box-sizing:border-box;outline:none" onchange="pickFieldEditValue(this.value)">
-  </select>
+  <div class="field-edit-search">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <input type="text" id="field-edit-search" placeholder="Search..." autocomplete="off" oninput="filterFieldEditOptions()">
+  </div>
+  <div id="field-edit-list" class="field-edit-list" role="listbox"></div>
   <div style="display:flex;gap:6px;margin-top:8px">
-    <button onclick="document.getElementById('field-edit-pop').style.display='none'" style="flex:1;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:5px;padding:5px;cursor:pointer;font-size:.72rem">Cancel</button>
+    <button type="button" onclick="closeFieldEditPop()" style="flex:1;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:5px;padding:5px;cursor:pointer;font-size:.72rem">Cancel</button>
   </div>
 </div>
 
 <!-- MONTH PICKER POPOVER -->
-<div id="month-picker-pop" style="display:none;position:fixed;z-index:9999;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:12px;box-shadow:0 8px 24px rgba(15,23,42,.12);min-width:190px">
-  <div style="font-size:.68rem;color:#64748b;margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Select Months</div>
-  <div id="month-picker-list" style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:1px"></div>
+<div id="month-picker-pop" style="display:none;position:fixed;z-index:9999;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:12px;box-shadow:0 8px 24px rgba(15,23,42,.12);min-width:220px">
+  <div style="font-size:.68rem;color:#64748b;margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Select Months — All Years</div>
+  <div id="month-picker-list" style="max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:1px"></div>
+  <div id="month-picker-selected-hint" class="month-picker-hint"></div>
   <div style="display:flex;gap:6px;margin-top:10px">
     <button onclick="saveMonthPicker()" style="flex:1;background:var(--accent);color:#fff;border:none;border-radius:5px;padding:5px;cursor:pointer;font-size:.72rem;font-weight:600">Save</button>
     <button onclick="document.getElementById('month-picker-pop').style.display='none'" style="flex:1;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:5px;padding:5px;cursor:pointer;font-size:.72rem">Cancel</button>
@@ -141,7 +253,7 @@ export const modalsHtml = `
     </div>
     <div class="form-row">
       <label>Stage after contact</label>
-      <select id="confirm-stage"><option value="Email Outreach">Email Outreach</option><option value="Call">Call</option><option value="Meeting / Positive">Meeting / Positive</option><option value="Retargeted">Retargeted</option></select>
+      <select id="confirm-stage"></select>
     </div>
     <div class="form-row">
       <label>Notes</label>
@@ -153,4 +265,29 @@ export const modalsHtml = `
     </div>
   </div>
 </div></div>
+
+<!-- PIPELINE TRASH / DELETED COMPANIES -->
+<div class="overlay" id="pipeline-trash-modal">
+  <div class="modal" style="width:min(520px,92vw)">
+    <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px">
+      <div>
+        <div class="modal-title" style="font-size:1.05rem;font-weight:700">Deleted companies</div>
+        <div style="font-size:.75rem;color:#64748b;margin-top:2px">Restore items back to the pipeline</div>
+      </div>
+      <button type="button" class="modal-close" onclick="closePipelineTrash()" aria-label="Close">✕</button>
+    </div>
+    <div class="pipeline-trash-toolbar" id="pipeline-trash-toolbar" hidden>
+      <label class="pipeline-trash-select-all">
+        <input type="checkbox" id="pipeline-trash-select-all" onchange="togglePipelineTrashSelectAll(this.checked)" />
+        <span>Select all</span>
+      </label>
+      <span class="pipeline-trash-selected-count" id="pipeline-trash-selected-count"></span>
+    </div>
+    <div id="pipeline-trash-list" style="max-height:360px;overflow:auto;display:flex;flex-direction:column;gap:8px"></div>
+    <div class="mbtns" style="margin-top:14px">
+      <button type="button" class="bcancel" onclick="closePipelineTrash()">Close</button>
+      <button type="button" class="bdanger" id="pipeline-trash-delete-selected-btn" onclick="deleteSelectedTrashedCompanies()" disabled>Delete selected</button>
+    </div>
+  </div>
+</div>
 `
