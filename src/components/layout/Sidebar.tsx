@@ -137,7 +137,7 @@ export function Sidebar({ activeTab }: { activeTab: NavTab }) {
           height={108}
           priority
         />
-         <div className="text-2xl font-bold text-center flex items-center justify-center">Merlin</div>
+         <div className="text-2xl font-bold text-center flex items-center justify-center">Marlin</div>
         <div className="brand-sub">Business Development</div>
       </div>
       <nav className="sidebar-nav">
