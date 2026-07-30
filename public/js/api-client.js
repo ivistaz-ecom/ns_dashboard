@@ -1,9 +1,8 @@
 /* eslint-disable */
 /**
  * Thin fetch wrapper around the Core PHP API described in /api/README.md.
- * Reads the base URL from window.__NS_API_BASE__, which layout.tsx injects.
- * That points at /php-api, a same-origin path rewritten to the PHP backend by
- * next.config.ts (upstream host configured via NS_API_ORIGIN).
+ * Reads the base URL from window.__NS_API_BASE__, which AppShell.tsx injects
+ * from the NEXT_PUBLIC_API_URL env var (see .env.example).
  *
  * This file intentionally does NOT touch dashboard.js's existing in-memory
  * state (customCompanies, potentialLeads, contacts, notes, followUps, etc.) —
@@ -33,7 +32,7 @@
 
   async function request(path, options) {
     if (!BASE) {
-      console.warn('[NsApi] window.__NS_API_BASE__ is not set — check the injector in layout.tsx');
+      console.warn('[NsApi] window.__NS_API_BASE__ is not set — check NEXT_PUBLIC_API_URL in .env');
     }
     const token = getToken();
     const headers = { 'Content-Type': 'application/json', ...(options && options.headers) };
