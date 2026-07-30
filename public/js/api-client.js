@@ -99,7 +99,7 @@
     deleteType: (id) => request('/type.php' + qs({ id }), { method: 'DELETE' }),
 
     // ---- country (lookup CRUD) ----
-    listCountries: () => request('/country.php'),
+    listCountries: (filters) => request('/country.php' + qs(filters)),
     createCountry: (country_name, country_prefix) => request('/country.php', { method: 'POST', body: JSON.stringify({ country_name, country_prefix }) }),
     updateCountry: (id, data) => request('/country.php' + qs({ id }), { method: 'PUT', body: JSON.stringify(data) }),
     deleteCountry: (id) => request('/country.php' + qs({ id }), { method: 'DELETE' }),
@@ -117,7 +117,14 @@
     createLead: (data) => request('/leads.php', { method: 'POST', body: JSON.stringify(data) }),
     updateLead: (id, data) => request('/leads.php' + qs({ id }), { method: 'PUT', body: JSON.stringify(data) }),
     convertLead: (id, overrides) => request('/leads.php' + qs({ id, action: 'convert' }), { method: 'PUT', body: JSON.stringify(overrides || {}) }),
-    deleteLead: (id) => request('/leads.php' + qs({ id }), { method: 'DELETE' }),
+    // Soft-delete by default (status → inactive). Pass hard=true to permanently remove.
+    deleteLead: (id, hard) => request('/leads.php' + qs({ id, hard: hard ? 1 : undefined }), { method: 'DELETE' }),
+    // Dedicated soft-delete endpoint (upload api-patches/lead_deactivate.php to Merlin).
+    deactivateLead: (id) =>
+      request('/lead_deactivate.php' + qs({ id }), {
+        method: 'POST',
+        body: JSON.stringify({ id: Number(id), status: 'inactive' }),
+      }),
 
     // ---- contacts ----
     listContacts: (filters) => request('/contacts.php' + qs(filters)),

@@ -11,6 +11,7 @@ import { WeeklyPanel } from "@/components/weekly/WeeklyPanel"
 import { LeadsPanel } from "@/components/leads/LeadsPanel"
 import { AnalyticsPanel } from "@/components/analytics/AnalyticsPanel"
 import { ContactsPanel } from "@/components/contacts/ContactsPanel"
+import { SettingsPanel } from "@/components/settings/SettingsPanel"
 import { DashboardModals } from "@/components/shared/DashboardModals"
 
 declare global {
@@ -20,6 +21,10 @@ declare global {
     __nsNavigate?: (tab: string) => void
     globalSearch?: (q: string) => void
     exportData?: () => void
+    setPipelineView?: (mode: string) => void
+    setLeadsView?: (mode: string) => void
+    editPipelineCompany?: (id: number | null) => void
+    openPipelineTrash?: () => void
   }
 }
 
@@ -32,6 +37,7 @@ const MainPanels = memo(function MainPanels() {
       <LeadsPanel />
       <AnalyticsPanel />
       <ContactsPanel />
+      <SettingsPanel />
     </div>
   )
 })
@@ -67,7 +73,7 @@ export function AppShell() {
         <DashboardModals />
       </main>
       <Script
-        src="/js/dashboard.js"
+        src="/js/dashboard.js?v=weekly-row-actions-confirm-1"
         strategy="afterInteractive"
         onLoad={() => {
           if (typeof window.__nsActivateTab === "function") {
