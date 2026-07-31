@@ -25,11 +25,23 @@ export const dashboardPanelHtml = `
         <div class="num" id="k-ret">—</div>
       </div>
     </div>
-    <div class="kpi amber clickable" onclick="kpiClick('Call')" id="kpi-call" title="Companies called in this date range — click to list them">
+    <div class="kpi amber clickable" onclick="kpiClick('Call')" id="kpi-call" title="Companies with a logged call — same count as Call on Pipeline by Stage">
       <div class="kpi-icon amber">📞</div>
       <div class="kpi-body">
-        <div class="kpi-top"><span class="lbl">Calls</span></div>
+        <div class="kpi-top"><span class="lbl">Call</span></div>
         <div class="num" id="k-call">—</div>
+      </div>
+    </div>
+    <div class="kpi cyan clickable" onclick="kpiClick('Ads')" id="kpi-ads" title="Companies with logged ads — click to list them">
+      <div class="kpi-icon cyan" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11l18-5v12L3 13v-2z"/>
+          <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>
+        </svg>
+      </div>
+      <div class="kpi-body">
+        <div class="kpi-top"><span class="lbl">Ads</span></div>
+        <div class="num" id="k-ads">—</div>
       </div>
     </div>
     <div class="kpi green clickable" onclick="kpiClick('Meeting / Positive')" id="kpi-pos">
@@ -46,10 +58,10 @@ export const dashboardPanelHtml = `
         <div class="num" id="k-neg">—</div>
       </div>
     </div>
-    <div class="kpi red2 clickable" onclick="kpiClick('__overdue__')" id="kpi-od">
-      <div class="kpi-icon red">⏰</div>
+    <div class="kpi red2 clickable" onclick="kpiClick('__followup__')" id="kpi-od" title="Companies with a follow-up date set">
+      <div class="kpi-icon red">📌</div>
       <div class="kpi-body">
-        <div class="kpi-top"><span class="lbl">Overdue Follow-up</span></div>
+        <div class="kpi-top"><span class="lbl">Follow-up</span></div>
         <div class="num" id="k-od">—</div>
       </div>
     </div>
@@ -58,7 +70,7 @@ export const dashboardPanelHtml = `
   <div class="charts-grid dashboard-only">
     <div class="chart-card">
       <div class="chart-title">Pipeline by Stage</div>
-      <div class="chart-subtitle">Share of companies in each stage</div>
+      <div class="chart-subtitle">Same counts as the KPI cards (Call = logged calls)</div>
       <div id="dash-chart-stage" class="chart-body chart-donut-wrap analytics-donut"></div>
     </div>
     <div class="chart-card">
@@ -158,6 +170,7 @@ export const dashboardPanelHtml = `
           <th onclick="sortBy('month')">Month <span class="sort-icon">↕</span></th>
           <th onclick="sortBy('stage')">Stage <span class="sort-icon">↕</span> <span class="th-hint">▾ click to edit</span></th>
           <th>Call</th>
+          <th>Ads</th>
           <th onclick="sortBy('_follow_up')">Follow-up <span class="sort-icon">↕</span></th>
           <th>Notes</th>
           <th>Actions</th>

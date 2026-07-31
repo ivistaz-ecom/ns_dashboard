@@ -548,6 +548,14 @@
 .dashboard-root .kpi-icon.amber {
   background: var(--warning-soft);
 }
+.dashboard-root .kpi-icon.cyan {
+  background: rgba(6, 182, 212, 0.14);
+  color: #0891b2;
+}
+.dashboard-root .kpi-icon.cyan svg {
+  display: block;
+  flex-shrink: 0;
+}
 .dashboard-root .kpi-icon.green {
   background: var(--success-soft);
 }
@@ -3497,7 +3505,9 @@
 
 /* ── Call badges ── */
 .dashboard-root .call-yes {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 4px 10px;
   border-radius: 999px;
   font-size: 0.6875rem;
@@ -3510,13 +3520,22 @@
   transition: all 0.15s ease;
 }
 
+.dashboard-root .call-yes svg,
+.dashboard-root .call-no svg {
+  display: block;
+  flex-shrink: 0;
+}
+
 .dashboard-root .call-yes:hover {
   background: rgba(34, 197, 94, 0.22);
   transform: scale(1.03);
 }
 
 .dashboard-root .call-no {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   padding: 4px 10px;
   border-radius: 999px;
   font-size: 0.6875rem;
