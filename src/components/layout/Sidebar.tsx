@@ -138,7 +138,7 @@ export function Sidebar({ activeTab }: { activeTab: NavTab }) {
           priority
         />
          <div className="text-2xl font-bold text-center flex items-center justify-center">Marlin</div>
-        <div className="brand-sub">Business Development</div>
+        <div className="brand-sub text-xl font-bold">Business Development Platform</div>
       </div>
       <nav className="sidebar-nav">
         {navItems

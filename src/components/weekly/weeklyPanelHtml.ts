@@ -46,8 +46,11 @@ export const weeklyPanelHtml = `
     <div class="wk-tabs" id="wk-tabs" role="tablist">
       <button type="button" class="wk-tab active" data-filter="all" onclick="setWeeklyFilter('all')">All Activity</button>
       <button type="button" class="wk-tab" data-filter="call" onclick="setWeeklyFilter('call')">Calls</button>
+      <button type="button" class="wk-tab" data-filter="ads" onclick="setWeeklyFilter('ads')">Ads</button>
       <button type="button" class="wk-tab" data-filter="email" onclick="setWeeklyFilter('email')">Emails</button>
       <button type="button" class="wk-tab" data-filter="meeting" onclick="setWeeklyFilter('meeting')">Meetings</button>
+      <button type="button" class="wk-tab" data-filter="whatsapp" onclick="setWeeklyFilter('whatsapp')">WhatsApp</button>
+      <button type="button" class="wk-tab" data-filter="linkedin" onclick="setWeeklyFilter('linkedin')">LinkedIn</button>
       <button type="button" class="wk-tab" data-filter="not-interested" onclick="setWeeklyFilter('not-interested')">Not Interested</button>
       <button type="button" class="wk-tab" data-filter="task" onclick="setWeeklyFilter('task')">Tasks</button>
     </div>
@@ -62,6 +65,7 @@ export const weeklyPanelHtml = `
         <datalist id="co-list"></datalist>
         <select class="cf-type" id="cf-type">
           <option value="call">Call</option>
+          <option value="ads">Ads</option>
           <option value="email">Email</option>
           <option value="meeting">Meeting</option>
           <option value="task">Task</option>

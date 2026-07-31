@@ -41,7 +41,7 @@ async function loadCompaniesFromApi() {
         country: r.country_name || "",
         mgmt_type: r.mgmt_type_name || "",
         status: r.status_detail || "",
-        stage: r.stage_name || "",
+        stage: canonicalStageName(r.stage_name || ""),
         month: r.month || "",
         date: r.week_label || "",
         reply_status: r.reply_status || "",
@@ -186,6 +186,13 @@ const STAGE_DOT_COLORS = {
  * Add a new row in phpMyAdmin (status = active) → it shows after refresh.
  * Set status = inactive → it disappears. No frontend code changes needed.
  */
+
+/** Legacy stage names → current canonical name. Not Interested is unchanged. */
+function canonicalStageName(s) {
+  if (s === "Meeting" || s === "2nd Round") return "Retargeted"
+  return s || ""
+}
+
 function getActiveStageLookups() {
   return (NS_LOOKUPS.stages || []).filter((s) => {
     const name = String(s.status_name || "").trim()
@@ -238,11 +245,17 @@ function getDashboardCountryOptions() {
 
 function getDashboardStageOptions() {
   const fromApi = getActiveStageLookups().map((s) =>
-    String(s.status_name || "").trim(),
+    canonicalStageName(String(s.status_name || "").trim()),
   )
-  const names = fromApi.length
-    ? fromApi.slice()
-    : DASHBOARD_STAGE_FALLBACK.slice()
+  const seen = new Set()
+  const names = []
+  ;(fromApi.length ? fromApi : DASHBOARD_STAGE_FALLBACK.slice()).forEach(
+    (n) => {
+      if (!n || seen.has(n)) return
+      seen.add(n)
+      names.push(n)
+    },
+  )
   return names.sort((a, b) => {
     const ao = STAGE_ORDER[a]
     const bo = STAGE_ORDER[b]
@@ -257,9 +270,14 @@ function getDashboardStageOptions() {
 function getDashboardStageRecords() {
   const order = getDashboardStageOptions()
   const byName = new Map(getActiveStageLookups().map((s) => [s.status_name, s]))
-  return order.map(
-    (name) => byName.get(name) || { id: null, status_name: name },
-  )
+  return order.map((name) => {
+    const row = byName.get(name) ||
+      (name === "Retargeted" ? byName.get("Meeting") : null) || {
+        id: null,
+        status_name: name,
+      }
+    return { ...row, status_name: name }
+  })
 }
 
 function stageDotColor(name) {
@@ -522,8 +540,10 @@ async function loadNotesFromApi() {
   })
 }
 let callActivityIdByCompany = {} // company key -> latest 'Call' activity's real id (undefined = not called)
+let adsActivityIdByCompany = {} // company key -> latest 'Ads' activity's real id (undefined = no ads)
 const ACTIVITY_UI_TO_API = {
   call: "Call",
+  ads: "Ads",
   email: "Email",
   whatsapp: "WhatsApp",
   linkedin: "LinkedIn",
@@ -534,6 +554,7 @@ const ACTIVITY_UI_TO_API = {
 }
 const ACTIVITY_API_TO_UI = {
   Call: "call",
+  Ads: "ads",
   Email: "email",
   WhatsApp: "whatsapp",
   LinkedIn: "linkedin",
@@ -571,16 +592,26 @@ function mapActivityFromApi(a) {
       : ""
   const tsSource = a.created_on || a.activity_date || date
   const ts = tsSource ? new Date(tsSource).getTime() : Date.now()
+  const notes = a.notes || ""
+  let type =
+    ACTIVITY_API_TO_UI[a.activity_type] ||
+    String(a.activity_type || "")
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+  // DB ENUM may not include Ads yet — invalid inserts keep notes but blank
+  // the type. Treat Ads notes as ads so KPI / column survive refresh.
+  if (
+    type !== "ads" &&
+    (/^Ads logged/i.test(notes) || /^\[Ads\]/i.test(notes))
+  ) {
+    type = "ads"
+  }
   return {
     id: a.id,
     company_id: a.company_id,
     company: row ? row.company : "",
-    type:
-      ACTIVITY_API_TO_UI[a.activity_type] ||
-      String(a.activity_type || "")
-        .toLowerCase()
-        .replace(/\s+/g, "-"),
-    text: a.notes || "",
+    type,
+    text: notes,
     date,
     ts: Number.isNaN(ts) ? Date.now() : ts,
     timeStr: formatActivityTime(a.created_on || a.activity_date),
@@ -611,8 +642,9 @@ async function loadActivitiesFromApi() {
     page += 1
   }
   if (!loadedOk) {
-    // Keep the pipeline Call column usable from the cached activity log
+    // Keep the pipeline Call / Ads columns usable from the cached activity log
     rebuildCallIndexFromComms()
+    rebuildAdsIndexFromComms()
     return
   }
   comms = loaded
@@ -900,9 +932,9 @@ let extraMonths = JSON.parse(localStorage.getItem("ns_extra_months") || "{}")
 let uniqueMode = true
 let retargetedNKs = new Set()
 
-// Migrate 2nd Round → Retargeted in overrides
+// Migrate legacy stage names → Retargeted in overrides
 Object.keys(stageOverrides).forEach((k) => {
-  if (stageOverrides[k] === "2nd Round") stageOverrides[k] = "Retargeted"
+  stageOverrides[k] = canonicalStageName(stageOverrides[k]) || stageOverrides[k]
 })
 
 function saveNotes() {
@@ -911,6 +943,7 @@ function saveNotes() {
 function saveComms() {
   localStorage.setItem("ns_comms", JSON.stringify(comms))
   rebuildCallIndexFromComms()
+  rebuildAdsIndexFromComms()
 }
 function saveSO() {
   localStorage.setItem("ns_stages", JSON.stringify(stageOverrides))
@@ -1045,10 +1078,11 @@ function companyMonthCount(r) {
 function getStage(r) {
   let s =
     r && r.stage === "Prospected" ? "Email Outreach" : (r && r.stage) || ""
+  s = canonicalStageName(s) || s
   const keepAsIs =
     s === "Meeting / Positive" || s === "Call" || s === "Not Interested"
   if (keepAsIs) return s
-  // 2+ months (or retarget flag) ⇒ Retargeted; otherwise Email Outreach
+  // 2+ months (or retarget flag) ⇒ Retargeted; Not Interested kept above
   if (r.is_retarget || companyMonthCount(r) >= 2) return "Retargeted"
   if (s === "Retargeted") return "Email Outreach"
   return s || "Email Outreach"
@@ -1466,8 +1500,6 @@ function applyFilters(keepPage) {
   const fs = document.getElementById("fs").value
   const fc = document.getElementById("fc").value
   const fg = document.getElementById("fg").value
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
   // Pre-compute retargeted set: 2+ unique months OR is_retarget flag from data.
   // The stored stage string is ignored on purpose: it can still read
   // "Retargeted" after a month was removed, which getStage() downgrades.
@@ -1511,15 +1543,13 @@ function applyFilters(keepPage) {
     if (retKpi) return true
     // other KPI filters
     if (kpiActiveFilter === "Call") return isCall(nk)
+    if (kpiActiveFilter === "Ads") return isAds(nk)
     if (kpiActiveFilter === "Meeting / Positive")
       return es === "Meeting / Positive"
     if (kpiActiveFilter === "Not Interested") return es === "Not Interested"
-    if (kpiActiveFilter === "__overdue__") {
+    if (kpiActiveFilter === "__followup__") {
       const fu = r._follow_up || followUps[nk] || ""
-      if (!fu) return false
-      const d = new Date(fu)
-      d.setHours(0, 0, 0, 0)
-      return d < today
+      return !!fu
     }
     return true
   })
@@ -1899,6 +1929,7 @@ function renderPipelineTableRow(r) {
       <td>${monthDisplay}</td>
       <td><span class="badge ${bc(es)} editable${isEdited ? " edited" : ""}" onclick="openStageDrop(event,'${eco}','${esc(r.month || "custom")}',${r._id || "null"})">${esc(es)}</span></td>
       <td><span data-co="${eco}" onclick="toggleCall(this.dataset.co)" class="${isCall(nk) ? "call-yes" : "call-no"}">${isCall(nk) ? "📞 Yes" : "—"}</span></td>
+      <td><span data-co="${eco}" onclick="toggleAds(this.dataset.co)" class="${isAds(nk) ? "call-yes" : "call-no"}" title="${isAds(nk) ? "Ads logged — click to clear" : "Click to log ads"}">${isAds(nk) ? ADS_ICON_SVG + " Yes" : ADS_ICON_SVG}</span></td>
       <td>${fuCell}</td>
       <td>${np}${note ? "" : `<button class="add-note-btn" onclick="addNote('${eco}')">＋ Note</button>`}</td>
       <td><div class="row-actions">${rowActionButton("edit", `rowActionEdit(event,'${eco}',${r._id || "null"})`, "Edit")}${rowActionButton("delete", `rowActionDelete(event,'${eco}',${r._id || "null"})`, "Delete", "is-danger")}</div></td>
@@ -1934,6 +1965,7 @@ function renderPipelineGridCard(r) {
   const fu = r._follow_up || followUps[nk] || ""
   const idAttr = r._id != null ? String(r._id) : "null"
   const called = isCall(nk)
+  const hasAds = isAds(nk)
   let fuLabel = "Set date"
   let fuTone = "neutral"
   if (fu) {
@@ -1982,6 +2014,10 @@ function renderPipelineGridCard(r) {
       <div class="pg-tile" role="button" tabindex="0" data-co="${eco}" onclick="toggleCall(this.dataset.co)">
         <span class="pg-tile-lbl">Call</span>
         <span class="pg-tile-val ${called ? "yes" : "muted"}">${called ? "Yes" : "—"}</span>
+      </div>
+      <div class="pg-tile" role="button" tabindex="0" data-co="${eco}" onclick="toggleAds(this.dataset.co)">
+        <span class="pg-tile-lbl">Ads</span>
+        <span class="pg-tile-val ${hasAds ? "yes" : "muted"}">${hasAds ? ADS_ICON_SVG + " Yes" : "—"}</span>
       </div>
     </div>
 
@@ -2043,17 +2079,27 @@ function cellChip(icon, onclick, label, opts) {
 }
 
 function noteChip(onclick, hasNote) {
-  return cellChip(hasNote ? "note" : "noteAdd", onclick, hasNote ? "View note" : "Add note", {
-    active: hasNote,
-  })
+  return cellChip(
+    hasNote ? "note" : "noteAdd",
+    onclick,
+    hasNote ? "View note" : "Add note",
+    {
+      active: hasNote,
+    },
+  )
 }
 
 function contactsChip(onclick, count, attrs) {
-  return cellChip("contacts", onclick, count ? `${count} contacts` : "Add contact", {
-    count,
-    active: !!count,
-    attrs,
-  })
+  return cellChip(
+    "contacts",
+    onclick,
+    count ? `${count} contacts` : "Add contact",
+    {
+      count,
+      active: !!count,
+      attrs,
+    },
+  )
 }
 
 /* Tooltips for [data-tooltip] live on <body> so scrollable tables can't clip them. */
@@ -2074,13 +2120,16 @@ function positionUiTooltip() {
   const below = top < pad
   if (below) top = anchor.bottom + gap
   const centered = anchor.left + anchor.width / 2 - tip.width / 2
-  const left = Math.max(pad, Math.min(centered, window.innerWidth - tip.width - pad))
+  const left = Math.max(
+    pad,
+    Math.min(centered, window.innerWidth - tip.width - pad),
+  )
   uiTipEl.style.top = `${Math.round(top)}px`
   uiTipEl.style.left = `${Math.round(left)}px`
   uiTipEl.classList.toggle("below", below)
   const caret = Math.max(
     10,
-    Math.min(anchor.left + anchor.width / 2 - left, tip.width - 10)
+    Math.min(anchor.left + anchor.width / 2 - left, tip.width - 10),
   )
   uiTipEl.style.setProperty("--tip-caret", `${Math.round(caret)}px`)
 }
@@ -2106,14 +2155,16 @@ function hideUiTooltip() {
 }
 
 document.addEventListener("mouseover", (e) => {
-  const target = e.target && e.target.closest ? e.target.closest("[data-tooltip]") : null
+  const target =
+    e.target && e.target.closest ? e.target.closest("[data-tooltip]") : null
   if (target === uiTipAnchor) return
   if (target) showUiTooltip(target)
   else hideUiTooltip()
 })
 
 document.addEventListener("focusin", (e) => {
-  const target = e.target && e.target.closest ? e.target.closest("[data-tooltip]") : null
+  const target =
+    e.target && e.target.closest ? e.target.closest("[data-tooltip]") : null
   if (target) showUiTooltip(target)
 })
 
@@ -2618,6 +2669,16 @@ function lookupId(list, nameField, name) {
   const m = list.find((x) => x[nameField] === name)
   return m ? m.id : null
 }
+
+/** Resolve stage id; "Retargeted" also matches legacy DB name "Meeting". */
+function lookupStageId(name) {
+  return (
+    lookupId(NS_LOOKUPS.stages, "status_name", name) ||
+    (name === "Retargeted"
+      ? lookupId(NS_LOOKUPS.stages, "status_name", "Meeting")
+      : null)
+  )
+}
 let extraMonthRowId = {} // "nk|month" -> real companies.id created via this picker
 
 function saveLeadMonthPicker(checked) {
@@ -2787,9 +2848,7 @@ async function saveMonthPicker() {
   const countryId = lookupId(NS_LOOKUPS.countries, "country_name", rec.country)
   const mgmtId = lookupId(NS_LOOKUPS.mgmt_types, "type_name", rec.mgmt_type)
   const nextStageName = checked.length >= 2 ? "Retargeted" : "Email Outreach"
-  const stageId =
-    lookupId(NS_LOOKUPS.stages, "status_name", nextStageName) ||
-    lookupId(NS_LOOKUPS.stages, "status_name", rec.stage)
+  const stageId = lookupStageId(nextStageName) || lookupStageId(rec.stage)
 
   try {
     for (const m of toCreate) {
@@ -2909,6 +2968,10 @@ async function deleteCompany(company) {
 function isCall(nk) {
   return !!callActivityIdByCompany[nk]
 }
+
+/** Shared megaphone SVG for Ads column / weekly tracker (12px for table cells). */
+const ADS_ICON_SVG =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l18-5v12L3 13v-2z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>'
 
 /**
  * Rebuild company key → latest Call activity id from `comms`, so the Pipeline
@@ -3039,7 +3102,119 @@ async function toggleCall(company) {
     renderTable()
     updateKPIs()
     if (typeof renderDashboardCharts === "function") renderDashboardCharts()
-    if (typeof renderAnalytics === "function" && document.getElementById("chart-stage"))
+    if (
+      typeof renderAnalytics === "function" &&
+      document.getElementById("chart-stage")
+    )
+      renderAnalytics()
+  } catch (err) {
+    nsToast(err instanceof Error ? err.message : "Update failed", "error")
+  }
+}
+
+function isAds(nk) {
+  return !!adsActivityIdByCompany[nk]
+}
+
+/**
+ * Rebuild company key → latest Ads activity id from `comms`, so the Pipeline
+ * "Ads" column, the Ads KPI and the Weekly Tracker all read one source.
+ */
+function rebuildAdsIndexFromComms() {
+  const map = {}
+  ;(comms || [])
+    .filter(
+      (c) =>
+        c &&
+        !c.synthetic &&
+        c.type === "ads" &&
+        c.id !== null &&
+        c.id !== undefined,
+    )
+    .sort(
+      (a, b) =>
+        (Number(b.ts) || 0) - (Number(a.ts) || 0) ||
+        (Number(b.id) || 0) - (Number(a.id) || 0),
+    )
+    .forEach((c) => {
+      const row = findCompanyRowById(c.company_id)
+      const nk = (row ? row.company : c.company || "").toLowerCase().trim()
+      if (!nk || map[nk] !== undefined) return
+      map[nk] = c.id
+    })
+  adsActivityIdByCompany = map
+}
+
+function countAdsActivities(range) {
+  const counted = new Set()
+  ;(comms || []).forEach((c) => {
+    if (!c || c.synthetic || c.type !== "ads" || !c.date) return
+    if (range) {
+      if (range.fromStr && c.date < range.fromStr) return
+      if (range.toStr && c.date > range.toStr) return
+    }
+    const key =
+      c.id !== null && c.id !== undefined
+        ? "id:" + c.id
+        : [c.company_id, c.date, c.text].join("|")
+    if (counted.has(key)) return
+    counted.add(key)
+  })
+  return counted.size
+}
+
+function adsCompanyKeys(range) {
+  if (!range) return new Set(Object.keys(adsActivityIdByCompany || {}))
+  const keys = new Set()
+  ;(comms || []).forEach((c) => {
+    if (!c || c.synthetic || c.type !== "ads" || !c.date) return
+    if (range.fromStr && c.date < range.fromStr) return
+    if (range.toStr && c.date > range.toStr) return
+    const row = findCompanyRowById(c.company_id)
+    const nk = (row ? row.company : c.company || "").toLowerCase().trim()
+    if (nk) keys.add(nk)
+  })
+  return keys
+}
+
+async function toggleAds(company) {
+  const co = company.replace(/&#39;/g, "'")
+  const nk = co.toLowerCase().trim()
+  const companyId = resolveCompanyId(co)
+  if (!companyId) {
+    nsToast(
+      "This row has no database id — refresh the page and try again.",
+      "error",
+    )
+    return
+  }
+  try {
+    if (adsActivityIdByCompany[nk]) {
+      const delId = adsActivityIdByCompany[nk]
+      await window.NsApi.deleteActivity(delId)
+      delete adsActivityIdByCompany[nk]
+      comms = comms.filter((c) => c.id !== delId)
+      saveComms()
+      if (document.getElementById("panel-weekly")) renderWeekly()
+    } else {
+      const created = await window.NsApi.createActivity({
+        company_id: companyId,
+        activity_type: "Ads",
+        notes: "Ads logged from pipeline",
+      })
+      adsActivityIdByCompany[nk] = created.id
+      logToTracker(co, "ads", "Ads logged from pipeline", {
+        id: created.id,
+        company_id: companyId,
+      })
+    }
+    renderTable()
+    updateKPIs()
+    if (typeof renderDashboardCharts === "function") renderDashboardCharts()
+    if (
+      typeof renderAnalytics === "function" &&
+      document.getElementById("chart-stage")
+    )
       renderAnalytics()
   } catch (err) {
     nsToast(err instanceof Error ? err.message : "Update failed", "error")
@@ -3191,9 +3366,10 @@ function kpiClick(filter) {
       const map = {
         Retargeted: "kpi-ret",
         Call: "kpi-call",
+        Ads: "kpi-ads",
         "Meeting / Positive": "kpi-pos",
         "Not Interested": "kpi-neg",
-        __overdue__: "kpi-od",
+        __followup__: "kpi-od",
       }
       if (map[filter])
         document.getElementById(map[filter]).classList.add("kpi-active")
@@ -3218,12 +3394,6 @@ function updateKPIs() {
   const rows = onDash
     ? getDashboardMetricCompanies()
     : getUniquePipelineCompanies()
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const toEl =
-    document.getElementById("hdate-to") || document.getElementById("hdate")
-  const asOf = onDash && toEl ? parseDateInput(toEl) || today : today
-  asOf.setHours(0, 0, 0, 0)
 
   // Retargeted within the (possibly date-scoped) row set
   const monthsByNk = {}
@@ -3266,25 +3436,28 @@ function updateKPIs() {
     callKeys.has(r.company.toLowerCase().trim()),
   ).length
   document.getElementById("k-call").textContent = callCount
+  const adsKeys = adsCompanyKeys(onDash ? getDashboardActivityRange() : null)
+  const adsCount = rows.filter((r) =>
+    adsKeys.has(r.company.toLowerCase().trim()),
+  ).length
+  const kAds = document.getElementById("k-ads")
+  if (kAds) kAds.textContent = adsCount
   const posCount = rows.filter(
     (r) => getStage(r) === "Meeting / Positive",
   ).length
   document.getElementById("k-pos").textContent = posCount
   const negCount = rows.filter((r) => getStage(r) === "Not Interested").length
   document.getElementById("k-neg").textContent = negCount
-  const od = rows.filter((r) => {
+  const fuRows = rows.filter((r) => {
     const nk = r.company.toLowerCase().trim()
     const fu = r._follow_up || followUps[nk] || ""
-    if (!fu) return false
-    const d = new Date(fu)
-    d.setHours(0, 0, 0, 0)
-    return d < asOf
+    return !!fu
   })
-  const odCount = new Set(
-    od.map((r) => r.company.toLowerCase().trim()).filter(Boolean),
+  const fuCount = new Set(
+    fuRows.map((r) => r.company.toLowerCase().trim()).filter(Boolean),
   ).size
-  document.getElementById("k-od").textContent = odCount
-  document.getElementById("kpi-od").style.display = odCount ? "" : "none"
+  document.getElementById("k-od").textContent = fuCount
+  document.getElementById("kpi-od").style.display = ""
 }
 
 // DASHBOARD CHARTS
@@ -5167,7 +5340,10 @@ function openStageDrop(event, company, month, id) {
   renderStageDropOptions()
   positionStageDrop(drop, event.target)
   const row = RAW_BASE.find((r) => r._id === id)
-  markStageDropCurrent(drop, row ? row.stage : "")
+  markStageDropCurrent(
+    drop,
+    row ? canonicalStageName(row.stage) || row.stage : "",
+  )
   drop.classList.add("open")
 }
 
@@ -5238,7 +5414,11 @@ async function setStage(stage) {
     )
     return
   }
-  const stageMatch = NS_LOOKUPS.stages.find((s) => s.status_name === stage)
+  const stageMatch =
+    NS_LOOKUPS.stages.find((s) => s.status_name === stage) ||
+    (stage === "Retargeted"
+      ? NS_LOOKUPS.stages.find((s) => s.status_name === "Meeting")
+      : null)
   try {
     await window.NsApi.updateCompany(activeStageRowId, {
       stage_id: stageMatch ? stageMatch.id : null,
@@ -5263,7 +5443,7 @@ async function setStage(stage) {
   }
 }
 
-/** When pipeline stage becomes Email / Meeting, also log a real activity. */
+/** When pipeline stage becomes Email / Meeting Positive, also log a real activity. */
 async function logStageAsActivity(row, stage) {
   if (!window.NsApi || !row || !row._id) return
   let activityType = null
@@ -5950,6 +6130,7 @@ if (!window.__nsKeydownBound) {
 // WEEKLY TRACKER
 const TYPE_LABEL = {
   call: "Call",
+  ads: "Ads",
   email: "Email",
   whatsapp: "WhatsApp",
   linkedin: "LinkedIn",
@@ -5963,6 +6144,7 @@ const TYPE_LABEL = {
 }
 const TYPE_ICON_SVG = {
   call: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
+  ads: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-5v12L3 13v-2z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>',
   email:
     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>',
   meeting:
@@ -5987,6 +6169,7 @@ let weeklyFormOpen = false
 function activityTitle(c) {
   const co = (c.company || "").trim()
   if (c.type === "call") return co ? `Called ${co}` : "Call logged"
+  if (c.type === "ads") return co ? `Ads — ${co}` : "Ads logged"
   if (c.type === "email") return co ? `Email sent to ${co}` : "Email sent"
   if (c.type === "meeting") {
     return co ? `Meeting report — ${co}` : "Meeting report"
@@ -6438,6 +6621,12 @@ async function addComm() {
         renderTable()
         updateKPIs()
       }
+      if (type === "ads") {
+        const nk = company.toLowerCase().trim()
+        adsActivityIdByCompany[nk] = created.id
+        renderTable()
+        updateKPIs()
+      }
       nsToast("Activity logged")
     }
     saveComms()
@@ -6462,7 +6651,15 @@ function openEditComm(id) {
   editingCommId = id
   document.getElementById("cf-company").value = c.company || ""
   const typeEl = document.getElementById("cf-type")
-  const allowed = ["call", "email", "meeting", "task", "whatsapp", "linkedin"]
+  const allowed = [
+    "call",
+    "ads",
+    "email",
+    "meeting",
+    "task",
+    "whatsapp",
+    "linkedin",
+  ]
   typeEl.value = allowed.includes(c.type) ? c.type : "task"
   document.getElementById("cf-text").value = c.text || ""
   document.getElementById("cf-date").value = c.date || ""
@@ -6504,6 +6701,14 @@ async function deleteComm(id) {
       const nk = (removed.company || "").toLowerCase().trim()
       if (nk && callActivityIdByCompany[nk] === id) {
         delete callActivityIdByCompany[nk]
+      }
+      renderTable()
+      updateKPIs()
+    }
+    if (removed.type === "ads") {
+      const nk = (removed.company || "").toLowerCase().trim()
+      if (nk && adsActivityIdByCompany[nk] === id) {
+        delete adsActivityIdByCompany[nk]
       }
       renderTable()
       updateKPIs()
@@ -8081,7 +8286,7 @@ function leadMonthCount(lead) {
 
 /**
  * Same Retargeted rules as Pipeline getStage():
- * 2+ months (or is_retarget) ⇒ Retargeted; Meeting / Not Interested kept as-is.
+ * 2+ months (or is_retarget) ⇒ Retargeted; Meeting / Positive & Not Interested kept as-is.
  */
 function getLeadStage(lead) {
   if (!lead) return "Email Outreach"
@@ -8090,6 +8295,7 @@ function getLeadStage(lead) {
     lead.stage === "Prospected"
       ? "Email Outreach"
       : lead.stage || extras.stage || ""
+  s = canonicalStageName(s) || s
   const keepAsIs =
     s === "Meeting / Positive" || s === "Call" || s === "Not Interested"
   if (keepAsIs) return s
@@ -8524,7 +8730,7 @@ function exportData() {
     return (a.company || "").localeCompare(b.company || "")
   })
 
-  // Columns match Pipeline list: Company, Country, Type, Month, Stage, Call, Follow-up, Notes
+  // Columns match Pipeline list: Company, Country, Type, Month, Stage, Call, Ads, Follow-up, Notes
   const pipelineHeaders = [
     "Company",
     "Code",
@@ -8534,6 +8740,7 @@ function exportData() {
     "All Months",
     "Stage",
     "Call",
+    "Ads",
     "Follow-up",
     "Notes",
     "Status Detail",
@@ -8564,6 +8771,7 @@ function exportData() {
         : []
     const stage = getStage(r) || ""
     const called = isCall(nk) ? "Yes" : "No"
+    const adsLogged = isAds(nk) ? "Yes" : "No"
     const fu = r._follow_up || followUps[nk] || ""
     return [
       r.company || "",
@@ -8574,6 +8782,7 @@ function exportData() {
       allMonths.join(", "),
       stage,
       called,
+      adsLogged,
       fu,
       noteArr.join(" | "),
       r.status || "",
@@ -8597,6 +8806,12 @@ function exportData() {
     [
       "Companies Called",
       companies.filter((r) => isCall((r.company || "").toLowerCase().trim()))
+        .length,
+    ],
+    ["Ads", countAdsActivities(null)],
+    [
+      "Companies with Ads",
+      companies.filter((r) => isAds((r.company || "").toLowerCase().trim()))
         .length,
     ],
     [
@@ -8679,6 +8894,11 @@ function exportData() {
       byCategory((r) => isCall((r.company || "").toLowerCase().trim())),
     ) +
     sheet(
+      "Ads",
+      pipelineHeaders,
+      byCategory((r) => isAds((r.company || "").toLowerCase().trim())),
+    ) +
+    sheet(
       "Meetings Positive",
       pipelineHeaders,
       byCategory((r) => getStage(r) === "Meeting / Positive"),
@@ -8746,7 +8966,8 @@ function importData(e) {
       // Reload all state from localStorage
       stageOverrides = JSON.parse(localStorage.getItem("ns_stages") || "{}")
       Object.keys(stageOverrides).forEach((k) => {
-        if (stageOverrides[k] === "2nd Round") stageOverrides[k] = "Retargeted"
+        stageOverrides[k] =
+          canonicalStageName(stageOverrides[k]) || stageOverrides[k]
       })
       notes = JSON.parse(localStorage.getItem("ns_notes") || "{}")
       communications = JSON.parse(localStorage.getItem("ns_comms") || "[]")
