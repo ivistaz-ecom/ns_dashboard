@@ -793,6 +793,7 @@ function latestNoteText(company) {
  * Prefer a concrete day from pipeline week_label (e.g. "18th June", "21 – 24 Jul")
  * within the campaign month; otherwise mid-month.
  */
+
 function dateStrFromPipelineWeek(weekLabel, monthLabel) {
   const monthDate = parseMonthLabel(monthLabel)
   if (!monthDate) return null
