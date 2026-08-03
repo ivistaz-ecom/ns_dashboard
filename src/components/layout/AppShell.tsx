@@ -73,7 +73,7 @@ export function AppShell() {
         <DashboardModals />
       </main>
       <Script
-        src="/js/dashboard.js?v=ads-megaphone-icon-1"
+        src="/js/dashboard.js?v=not-interested-like-meeting-1"
         strategy="afterInteractive"
         onLoad={() => {
           if (typeof window.__nsActivateTab === "function") {

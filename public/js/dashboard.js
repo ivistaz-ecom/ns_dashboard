@@ -182,6 +182,19 @@ const STAGE_DOT_COLORS = {
 }
 
 /**
+ * Unique-company merge priority. Meeting / Positive and Not Interested are both
+ * retarget outcomes — both must beat Retargeted so either choice sticks.
+ */
+const STAGE_DISPLAY_PRIORITY = {
+  "Meeting / Positive": 6,
+  "Not Interested": 5,
+  Call: 4,
+  Retargeted: 3,
+  "Email Outreach": 2,
+  Prospected: 1,
+}
+
+/**
  * Every row in `stage` with status = 'active' — used site-wide.
  * Add a new row in phpMyAdmin (status = active) → it shows after refresh.
  * Set status = inactive → it disappears. No frontend code changes needed.
@@ -190,7 +203,37 @@ const STAGE_DOT_COLORS = {
 /** Legacy stage names → current canonical name. Not Interested is unchanged. */
 function canonicalStageName(s) {
   if (s === "Meeting" || s === "2nd Round") return "Retargeted"
+  if (s === "Meeting Scheduled") return "Meeting / Positive"
   return s || ""
+}
+
+/** Outcome stages after a retarget — keep these even when months trigger Retargeted. */
+function isRetargetOutcomeStage(s) {
+  const n = canonicalStageName(s) || s
+  return n === "Meeting / Positive" || n === "Not Interested"
+}
+
+/**
+ * Retargeted ONLY when 2+ distinct outreach months are selected,
+ * or any tagged month is 2+ years old. Stale is_retarget flags are ignored.
+ */
+function monthsIndicateRetarget(monthLabels) {
+  const months = [
+    ...new Set(
+      (monthLabels || [])
+        .filter(isValidMonthLabel)
+        .map((m) => String(m).trim()),
+    ),
+  ]
+  if (months.length >= 2) return true
+  const now = new Date()
+  const nowOrd = now.getFullYear() * 12 + now.getMonth()
+  return months.some((m) => {
+    const d = parseMonthLabel(m)
+    if (!d) return false
+    const age = nowOrd - (d.getFullYear() * 12 + d.getMonth())
+    return age >= 24
+  })
 }
 
 function getActiveStageLookups() {
@@ -541,9 +584,11 @@ async function loadNotesFromApi() {
 }
 let callActivityIdByCompany = {} // company key -> latest 'Call' activity's real id (undefined = not called)
 let adsActivityIdByCompany = {} // company key -> latest 'Ads' activity's real id (undefined = no ads)
+let factorsActivityIdByCompany = {} // company key -> latest 'Factors' activity's real id (undefined = no factors)
 const ACTIVITY_UI_TO_API = {
   call: "Call",
   ads: "Ads",
+  factors: "Factors",
   email: "Email",
   whatsapp: "WhatsApp",
   linkedin: "LinkedIn",
@@ -555,6 +600,7 @@ const ACTIVITY_UI_TO_API = {
 const ACTIVITY_API_TO_UI = {
   Call: "call",
   Ads: "ads",
+  Factors: "factors",
   Email: "email",
   WhatsApp: "whatsapp",
   LinkedIn: "linkedin",
@@ -598,13 +644,19 @@ function mapActivityFromApi(a) {
     String(a.activity_type || "")
       .toLowerCase()
       .replace(/\s+/g, "-")
-  // DB ENUM may not include Ads yet — invalid inserts keep notes but blank
-  // the type. Treat Ads notes as ads so KPI / column survive refresh.
+  // DB ENUM may not include Ads / Factors yet — invalid inserts keep notes but
+  // blank the type. Treat logged notes as ads/factors so KPI / column survive refresh.
   if (
     type !== "ads" &&
     (/^Ads logged/i.test(notes) || /^\[Ads\]/i.test(notes))
   ) {
     type = "ads"
+  }
+  if (
+    type !== "factors" &&
+    (/^Factors logged/i.test(notes) || /^\[Factors\]/i.test(notes))
+  ) {
+    type = "factors"
   }
   return {
     id: a.id,
@@ -642,9 +694,10 @@ async function loadActivitiesFromApi() {
     page += 1
   }
   if (!loadedOk) {
-    // Keep the pipeline Call / Ads columns usable from the cached activity log
+    // Keep the pipeline Call / Ads / Factors columns usable from the cached activity log
     rebuildCallIndexFromComms()
     rebuildAdsIndexFromComms()
+    rebuildFactorsIndexFromComms()
     return
   }
   comms = loaded
@@ -944,6 +997,7 @@ function saveComms() {
   localStorage.setItem("ns_comms", JSON.stringify(comms))
   rebuildCallIndexFromComms()
   rebuildAdsIndexFromComms()
+  rebuildFactorsIndexFromComms()
 }
 function saveSO() {
   localStorage.setItem("ns_stages", JSON.stringify(stageOverrides))
@@ -1059,31 +1113,49 @@ function setField(company, field, value) {
     }),
   )
 }
-function companyMonthCount(r) {
-  if (!r) return 0
+function companyMonthLabels(r) {
+  if (!r) return []
   const nk = (r.company || "").toLowerCase().trim()
   const months = new Set()
   ;(r._all_months || []).forEach((m) => {
-    if (isValidMonthLabel(m)) months.add(m.trim())
+    if (isValidMonthLabel(m)) months.add(String(m).trim())
   })
+  // Include every pipeline row for this company (month tags live on separate rows)
+  if (nk && typeof RAW_BASE !== "undefined") {
+    RAW_BASE.forEach((row) => {
+      if ((row.company || "").toLowerCase().trim() !== nk) return
+      if (isValidMonthLabel(row.month)) months.add(String(row.month).trim())
+    })
+  }
   ;((typeof extraMonths !== "undefined" && extraMonths[nk]) || []).forEach(
     (m) => {
-      if (isValidMonthLabel(m)) months.add(m.trim())
+      if (isValidMonthLabel(m)) months.add(String(m).trim())
     },
   )
   if (isValidMonthLabel(r.month)) months.add(String(r.month).trim())
-  return months.size
+  return [...months]
+}
+
+function companyMonthCount(r) {
+  return companyMonthLabels(r).length
+}
+
+function companyIsRetargeted(r) {
+  // Display rule: months only — never trust a leftover is_retarget flag alone
+  return !!(r && monthsIndicateRetarget(companyMonthLabels(r)))
 }
 
 function getStage(r) {
-  let s =
-    r && r.stage === "Prospected" ? "Email Outreach" : (r && r.stage) || ""
-  s = canonicalStageName(s) || s
+  let s = canonicalStageName((r && r.stage) || "") || (r && r.stage) || ""
+  // Meeting Scheduled / Not Interested are retarget outcomes — keep them.
+  // Call & Prospected stay as-is. Otherwise 2+ months or 2+ years ⇒ Retargeted.
   const keepAsIs =
-    s === "Meeting / Positive" || s === "Call" || s === "Not Interested"
+    s === "Meeting / Positive" ||
+    s === "Call" ||
+    s === "Not Interested" ||
+    s === "Prospected"
   if (keepAsIs) return s
-  // 2+ months (or retarget flag) ⇒ Retargeted; Not Interested kept above
-  if (r.is_retarget || companyMonthCount(r) >= 2) return "Retargeted"
+  if (companyIsRetargeted(r)) return "Retargeted"
   if (s === "Retargeted") return "Email Outreach"
   return s || "Email Outreach"
 }
@@ -1377,14 +1449,7 @@ function filterRowsByDashboardDate(rows) {
 
 function dedupeCompaniesHighestStage(rows) {
   const seen = {}
-  const SP = {
-    "Meeting / Positive": 6,
-    Call: 5,
-    Retargeted: 4,
-    "Not Interested": 3,
-    "Email Outreach": 2,
-    Prospected: 1,
-  }
+  const SP = STAGE_DISPLAY_PRIORITY
   rows.forEach((r) => {
     const k = r.company.toLowerCase().trim()
     if (!seen[k]) {
@@ -1500,24 +1565,23 @@ function applyFilters(keepPage) {
   const fs = document.getElementById("fs").value
   const fc = document.getElementById("fc").value
   const fg = document.getElementById("fg").value
-  // Pre-compute retargeted set: 2+ unique months OR is_retarget flag from data.
-  // The stored stage string is ignored on purpose: it can still read
-  // "Retargeted" after a month was removed, which getStage() downgrades.
+  // Pre-compute retargeted set: 2+ months selected OR 2+ years aged only.
+  // The stored stage / is_retarget flag is ignored so a single current month
+  // never stays "Retargeted" after other months were removed.
   const monthsByNk = {}
   all.forEach((r) => {
     const nk = r.company.toLowerCase().trim()
-    if (!monthsByNk[nk]) monthsByNk[nk] = { months: new Set(), ret: false }
+    if (!monthsByNk[nk]) monthsByNk[nk] = { months: new Set() }
     if (isValidMonthLabel(r.month))
       monthsByNk[nk].months.add(String(r.month).trim())
-    if (r.is_retarget) monthsByNk[nk].ret = true
   })
   retargetedNKs = new Set()
   Object.keys(monthsByNk).forEach((nk) => {
     const extra = (extraMonths[nk] || [])
       .filter(isValidMonthLabel)
       .map((m) => String(m).trim())
-    const total = new Set([...monthsByNk[nk].months, ...extra])
-    if (total.size >= 2 || monthsByNk[nk].ret) retargetedNKs.add(nk)
+    const total = [...new Set([...monthsByNk[nk].months, ...extra])]
+    if (monthsIndicateRetarget(total)) retargetedNKs.add(nk)
   })
   filtered = all.filter((r) => {
     const es = getStage(r)
@@ -1544,6 +1608,7 @@ function applyFilters(keepPage) {
     // other KPI filters
     if (kpiActiveFilter === "Call") return isCall(nk)
     if (kpiActiveFilter === "Ads") return isAds(nk)
+    if (kpiActiveFilter === "Factors") return isFactors(nk)
     if (kpiActiveFilter === "Meeting / Positive")
       return es === "Meeting / Positive"
     if (kpiActiveFilter === "Not Interested") return es === "Not Interested"
@@ -1556,14 +1621,7 @@ function applyFilters(keepPage) {
   // Unique mode: one row per company, highest stage, all months noted
   if (uniqueMode) {
     const seen = {}
-    const STAGE_PRIORITY = {
-      "Meeting / Positive": 6,
-      Call: 5,
-      Retargeted: 4,
-      "Not Interested": 3,
-      "Email Outreach": 2,
-      Prospected: 1,
-    }
+    const STAGE_PRIORITY = STAGE_DISPLAY_PRIORITY
     filtered.forEach((r) => {
       const ck = r.company.toLowerCase().trim()
       if (!seen[ck]) {
@@ -1619,6 +1677,7 @@ function applyFilters(keepPage) {
   applySort()
   if (!keepPage) page = 1
   renderTable()
+  if (!keepPage) resetPipelineScroll()
   updateKPIs()
   renderDashboardCharts()
 }
@@ -1930,6 +1989,7 @@ function renderPipelineTableRow(r) {
       <td><span class="badge ${bc(es)} editable${isEdited ? " edited" : ""}" onclick="openStageDrop(event,'${eco}','${esc(r.month || "custom")}',${r._id || "null"})">${esc(es)}</span></td>
       <td><span data-co="${eco}" onclick="toggleCall(this.dataset.co)" class="${isCall(nk) ? "call-yes" : "call-no"}">${isCall(nk) ? "📞 Yes" : "—"}</span></td>
       <td><span data-co="${eco}" onclick="toggleAds(this.dataset.co)" class="${isAds(nk) ? "call-yes" : "call-no"}" title="${isAds(nk) ? "Ads logged — click to clear" : "Click to log ads"}">${isAds(nk) ? ADS_ICON_SVG + " Yes" : ADS_ICON_SVG}</span></td>
+      <td><span data-co="${eco}" onclick="toggleFactors(this.dataset.co)" class="${isFactors(nk) ? "call-yes" : "call-no"}" title="${isFactors(nk) ? "Factors logged — click to clear" : "Click to log factors"}">${isFactors(nk) ? FACTORS_ICON_SVG + " Yes" : FACTORS_ICON_SVG}</span></td>
       <td>${fuCell}</td>
       <td>${np}${note ? "" : `<button class="add-note-btn" onclick="addNote('${eco}')">＋ Note</button>`}</td>
       <td><div class="row-actions">${rowActionButton("edit", `rowActionEdit(event,'${eco}',${r._id || "null"})`, "Edit")}${rowActionButton("delete", `rowActionDelete(event,'${eco}',${r._id || "null"})`, "Delete", "is-danger")}</div></td>
@@ -1966,6 +2026,7 @@ function renderPipelineGridCard(r) {
   const idAttr = r._id != null ? String(r._id) : "null"
   const called = isCall(nk)
   const hasAds = isAds(nk)
+  const hasFactors = isFactors(nk)
   let fuLabel = "Set date"
   let fuTone = "neutral"
   if (fu) {
@@ -2018,6 +2079,10 @@ function renderPipelineGridCard(r) {
       <div class="pg-tile" role="button" tabindex="0" data-co="${eco}" onclick="toggleAds(this.dataset.co)">
         <span class="pg-tile-lbl">Ads</span>
         <span class="pg-tile-val ${hasAds ? "yes" : "muted"}">${hasAds ? ADS_ICON_SVG + " Yes" : "—"}</span>
+      </div>
+      <div class="pg-tile" role="button" tabindex="0" data-co="${eco}" onclick="toggleFactors(this.dataset.co)">
+        <span class="pg-tile-lbl">Factors</span>
+        <span class="pg-tile-val ${hasFactors ? "yes" : "muted"}">${hasFactors ? FACTORS_ICON_SVG + " Yes" : "—"}</span>
       </div>
     </div>
 
@@ -2325,10 +2390,23 @@ function renderPageNumbers(total) {
   container.innerHTML = html
 }
 
+function resetPipelineScroll() {
+  const el = document.getElementById("pipeline-scroll")
+  if (!el) return
+  el.scrollTop = 0
+  el.scrollLeft = 0
+}
+
 function goToPage(p) {
   page = p
   renderTable()
-  document.getElementById("pipeline-scroll").scrollTop = 0
+  resetPipelineScroll()
+}
+
+function changePage(dir) {
+  page += dir
+  renderTable()
+  resetPipelineScroll()
 }
 
 function saveFollowUps() {
@@ -2701,12 +2779,15 @@ function saveLeadMonthPicker(checked) {
   extras.months = sorted
   if (sorted.length) delete extras.monthless
   else extras.monthless = true
-  // Mirror pipeline: 2+ months ⇒ Retargeted
-  if (sorted.length >= 2) {
-    extras.stage = "Retargeted"
+  // Mirror pipeline: 2+ months or 2+ years ⇒ Retargeted;
+  // keep Meeting Scheduled / Not Interested as outcome stages.
+  const retarget = monthsIndicateRetarget(sorted)
+  const curStage = canonicalStageName(extras.stage || lead.stage) || ""
+  if (retarget) {
+    if (!isRetargetOutcomeStage(curStage)) extras.stage = "Retargeted"
     extras.is_retarget = true
   } else if (extras.stage === "Retargeted" || extras.is_retarget) {
-    extras.stage = "Email Outreach"
+    if (!isRetargetOutcomeStage(curStage)) extras.stage = "Email Outreach"
     extras.is_retarget = false
   }
   leadExtras[leadId] = extras
@@ -2723,8 +2804,10 @@ function saveLeadMonthPicker(checked) {
   nsToast(
     !sorted.length
       ? "Months cleared — lead kept"
-      : sorted.length >= 2
-        ? "Months updated — stage set to Retargeted"
+      : retarget
+        ? isRetargetOutcomeStage(extras.stage)
+          ? "Months updated — kept " + extras.stage
+          : "Months updated — stage set to Retargeted"
         : "Months updated — stage set to Email Outreach",
   )
 }
@@ -2847,7 +2930,16 @@ async function saveMonthPicker() {
 
   const countryId = lookupId(NS_LOOKUPS.countries, "country_name", rec.country)
   const mgmtId = lookupId(NS_LOOKUPS.mgmt_types, "type_name", rec.mgmt_type)
-  const nextStageName = checked.length >= 2 ? "Retargeted" : "Email Outreach"
+  const retarget = monthsIndicateRetarget(checked)
+  const curStage = canonicalStageName(rec.stage) || rec.stage || ""
+  // Keep Meeting Scheduled / Not Interested when months trigger retarget
+  const nextStageName = retarget
+    ? isRetargetOutcomeStage(curStage)
+      ? curStage
+      : "Retargeted"
+    : isRetargetOutcomeStage(curStage)
+      ? curStage
+      : "Email Outreach"
   const stageId = lookupStageId(nextStageName) || lookupStageId(rec.stage)
 
   try {
@@ -2858,7 +2950,7 @@ async function saveMonthPicker() {
         mgmt_type_id: mgmtId,
         stage_id: stageId,
         month: m,
-        is_retarget: checked.length >= 2 ? 1 : 0,
+        is_retarget: retarget ? 1 : 0,
       })
       extraMonthRowId[nk + "|" + m] = created.id
       RAW_BASE.push({
@@ -2872,7 +2964,7 @@ async function saveMonthPicker() {
         month: m,
         date: created.week_label || "",
         reply_status: "",
-        is_retarget: checked.length >= 2,
+        is_retarget: retarget,
       })
     }
     for (const m of toRemoveExtra) {
@@ -2893,18 +2985,19 @@ async function saveMonthPicker() {
       delete extraMonthRowId[nk + "|" + row.month]
     }
 
-    // Sync stage on remaining rows: 2+ months → Retargeted, 1 month → Email Outreach
+    // Sync stage on remaining rows: 2+ months / 2+ years → Retargeted
+    // (keep Meeting Scheduled / Not Interested outcomes)
     const remaining = RAW_BASE.filter(
       (r) => r.company.toLowerCase().trim() === nk,
     )
     for (const row of remaining) {
       row.stage = nextStageName
-      row.is_retarget = checked.length >= 2
+      row.is_retarget = retarget
       if (row._id && stageId) {
         try {
           await window.NsApi.updateCompany(row._id, {
             stage_id: stageId,
-            is_retarget: checked.length >= 2 ? 1 : 0,
+            is_retarget: retarget ? 1 : 0,
           })
         } catch (e) {
           /* best-effort stage sync */
@@ -2917,8 +3010,10 @@ async function saveMonthPicker() {
     document.getElementById("month-picker-pop").style.display = "none"
     applyFilters(true)
     nsToast(
-      checked.length >= 2
-        ? "Months updated — stage set to Retargeted"
+      retarget
+        ? isRetargetOutcomeStage(nextStageName)
+          ? "Months updated — kept " + nextStageName
+          : "Months updated — stage set to Retargeted"
         : "Months updated — stage set to Email Outreach",
     )
   } catch (err) {
@@ -2972,6 +3067,10 @@ function isCall(nk) {
 /** Shared megaphone SVG for Ads column / weekly tracker (12px for table cells). */
 const ADS_ICON_SVG =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l18-5v12L3 13v-2z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>'
+
+/** Shared layers SVG for Factors column / weekly tracker (12px for table cells). */
+const FACTORS_ICON_SVG =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>'
 
 /**
  * Rebuild company key → latest Call activity id from `comms`, so the Pipeline
@@ -3221,6 +3320,115 @@ async function toggleAds(company) {
   }
 }
 
+function isFactors(nk) {
+  return !!factorsActivityIdByCompany[nk]
+}
+
+/**
+ * Rebuild company key → latest Factors activity id from `comms`, so the Pipeline
+ * "Factors" column, the Factors KPI and the Weekly Tracker all read one source.
+ */
+function rebuildFactorsIndexFromComms() {
+  const map = {}
+  ;(comms || [])
+    .filter(
+      (c) =>
+        c &&
+        !c.synthetic &&
+        c.type === "factors" &&
+        c.id !== null &&
+        c.id !== undefined,
+    )
+    .sort(
+      (a, b) =>
+        (Number(b.ts) || 0) - (Number(a.ts) || 0) ||
+        (Number(b.id) || 0) - (Number(a.id) || 0),
+    )
+    .forEach((c) => {
+      const row = findCompanyRowById(c.company_id)
+      const nk = (row ? row.company : c.company || "").toLowerCase().trim()
+      if (!nk || map[nk] !== undefined) return
+      map[nk] = c.id
+    })
+  factorsActivityIdByCompany = map
+}
+
+function countFactorsActivities(range) {
+  const counted = new Set()
+  ;(comms || []).forEach((c) => {
+    if (!c || c.synthetic || c.type !== "factors" || !c.date) return
+    if (range) {
+      if (range.fromStr && c.date < range.fromStr) return
+      if (range.toStr && c.date > range.toStr) return
+    }
+    const key =
+      c.id !== null && c.id !== undefined
+        ? "id:" + c.id
+        : [c.company_id, c.date, c.text].join("|")
+    if (counted.has(key)) return
+    counted.add(key)
+  })
+  return counted.size
+}
+
+function factorsCompanyKeys(range) {
+  if (!range) return new Set(Object.keys(factorsActivityIdByCompany || {}))
+  const keys = new Set()
+  ;(comms || []).forEach((c) => {
+    if (!c || c.synthetic || c.type !== "factors" || !c.date) return
+    if (range.fromStr && c.date < range.fromStr) return
+    if (range.toStr && c.date > range.toStr) return
+    const row = findCompanyRowById(c.company_id)
+    const nk = (row ? row.company : c.company || "").toLowerCase().trim()
+    if (nk) keys.add(nk)
+  })
+  return keys
+}
+
+async function toggleFactors(company) {
+  const co = company.replace(/&#39;/g, "'")
+  const nk = co.toLowerCase().trim()
+  const companyId = resolveCompanyId(co)
+  if (!companyId) {
+    nsToast(
+      "This row has no database id — refresh the page and try again.",
+      "error",
+    )
+    return
+  }
+  try {
+    if (factorsActivityIdByCompany[nk]) {
+      const delId = factorsActivityIdByCompany[nk]
+      await window.NsApi.deleteActivity(delId)
+      delete factorsActivityIdByCompany[nk]
+      comms = comms.filter((c) => c.id !== delId)
+      saveComms()
+      if (document.getElementById("panel-weekly")) renderWeekly()
+    } else {
+      const created = await window.NsApi.createActivity({
+        company_id: companyId,
+        activity_type: "Factors",
+        notes: "Factors logged from pipeline",
+      })
+      factorsActivityIdByCompany[nk] = created.id
+      logToTracker(co, "factors", "Factors logged from pipeline", {
+        id: created.id,
+        company_id: companyId,
+      })
+    }
+    renderTable()
+    updateKPIs()
+    if (typeof renderDashboardCharts === "function") renderDashboardCharts()
+    if (
+      typeof renderAnalytics === "function" &&
+      document.getElementById("chart-stage")
+    )
+      renderAnalytics()
+  } catch (err) {
+    nsToast(err instanceof Error ? err.message : "Update failed", "error")
+  }
+}
+
 // Last contacted: pull from comms log
 function lastContactedDate(nk) {
   const entries = comms.filter(
@@ -3367,6 +3575,7 @@ function kpiClick(filter) {
         Retargeted: "kpi-ret",
         Call: "kpi-call",
         Ads: "kpi-ads",
+        Factors: "kpi-factors",
         "Meeting / Positive": "kpi-pos",
         "Not Interested": "kpi-neg",
         __followup__: "kpi-od",
@@ -3395,14 +3604,13 @@ function updateKPIs() {
     ? getDashboardMetricCompanies()
     : getUniquePipelineCompanies()
 
-  // Retargeted within the (possibly date-scoped) row set
+  // Retargeted within the (possibly date-scoped) row set — months only
   const monthsByNk = {}
   all.forEach((r) => {
     const nk = r.company.toLowerCase().trim()
-    if (!monthsByNk[nk]) monthsByNk[nk] = { months: new Set(), ret: false }
+    if (!monthsByNk[nk]) monthsByNk[nk] = { months: new Set() }
     if (isValidMonthLabel(r.month))
       monthsByNk[nk].months.add(String(r.month).trim())
-    if (r.is_retarget) monthsByNk[nk].ret = true
   })
   const range = onDash ? getDashboardMonthRange() : null
   const retSet = new Set()
@@ -3418,8 +3626,10 @@ function updateKPIs() {
         if (range.toOrd != null && ord > range.toOrd) return false
         return true
       })
-    const monthTotal = new Set([...monthsByNk[nk].months, ...extra])
-    if (monthTotal.size >= 2 || monthsByNk[nk].ret) retSet.add(nk)
+    const monthTotal = [
+      ...new Set([...monthsByNk[nk].months, ...extra]),
+    ]
+    if (monthsIndicateRetarget(monthTotal)) retSet.add(nk)
   })
   if (!onDash) retargetedNKs = retSet
 
@@ -3442,6 +3652,14 @@ function updateKPIs() {
   ).length
   const kAds = document.getElementById("k-ads")
   if (kAds) kAds.textContent = adsCount
+  const factorsKeys = factorsCompanyKeys(
+    onDash ? getDashboardActivityRange() : null,
+  )
+  const factorsCount = rows.filter((r) =>
+    factorsKeys.has(r.company.toLowerCase().trim()),
+  ).length
+  const kFactors = document.getElementById("k-factors")
+  if (kFactors) kFactors.textContent = factorsCount
   const posCount = rows.filter(
     (r) => getStage(r) === "Meeting / Positive",
   ).length
@@ -3593,43 +3811,82 @@ function renderMetricCharts(ids, opts) {
   const all = opts.companies || getAllCompanies()
   const cos = dedupeCompaniesHighestStage(all)
 
-  // 1. Pipeline by Stage — donut from active DB stages (no manual list)
+  // 1. Pipeline by Stage — Retargeted & Call match KPI cards (they can overlap:
+  // a company may be Retargeted and also have a logged call).
   const stageOrder = getDashboardStageOptions()
-  // Include any live stage on a row that isn't in lookups yet (legacy data)
   cos.forEach((r) => {
     const s = getStage(r)
     if (s && !stageOrder.includes(s)) stageOrder.push(s)
   })
-  // "Call" on the donut must match the Calls KPI / pipeline Call column
-  // (logged call activity), not the Stage field alone.
   const callKeys = callCompanyKeys(
     isDashboardPage() ? getDashboardActivityRange() : null,
   )
   if (callKeys.size && !stageOrder.includes("Call")) stageOrder.push("Call")
+  if (!stageOrder.includes("Retargeted")) stageOrder.push("Retargeted")
+
   const stageCols = {}
   stageOrder.forEach((s) => {
     stageCols[s] = s === "Email Outreach" ? "#008E9C" : stageDotColor(s)
   })
-  const stageCounts = {}
-  stageOrder.forEach((s) => (stageCounts[s] = 0))
+
   const fallbackStage = stageOrder.includes("Email Outreach")
     ? "Email Outreach"
     : stageOrder[0] || "Email Outreach"
-  // Companies with a logged call → Call slice. Stale Stage="Call" without a
-  // logged call falls back so the slice doesn't inflate past the KPI.
+
+  // Same formulas as updateKPIs() for Retargeted + Call
+  let retargetedCount = 0
+  let callCount = 0
+  let meetingCount = 0
+  let notInterestedCount = 0
+  const otherCounts = {}
   cos.forEach((r) => {
     const nk = (r.company || "").toLowerCase().trim()
-    let s = getStage(r)
-    if (callKeys.has(nk)) s = "Call"
-    else if (s === "Call") s = fallbackStage
-    if (stageCounts[s] !== undefined) stageCounts[s]++
-    else stageCounts[fallbackStage]++
+    const stage = getStage(r)
+    if (stage === "Retargeted") retargetedCount++
+    if (callKeys.has(nk)) callCount++
+    if (stage === "Meeting / Positive") meetingCount++
+    if (stage === "Not Interested") notInterestedCount++
+
+    // Remaining exclusive slices (Email / etc.) — skip KPI overlap stages and
+    // companies already represented by the Call KPI so Email isn't inflated.
+    if (
+      stage === "Retargeted" ||
+      stage === "Meeting / Positive" ||
+      stage === "Not Interested"
+    ) {
+      return
+    }
+    if (callKeys.has(nk)) return
+    let s = stage
+    if (s === "Call") s = fallbackStage
+    if (!s) s = fallbackStage
+    otherCounts[s] = (otherCounts[s] || 0) + 1
   })
+
+  Object.keys(otherCounts).forEach((s) => {
+    if (s && !stageOrder.includes(s)) stageOrder.push(s)
+    if (!stageCols[s]) {
+      stageCols[s] = s === "Email Outreach" ? "#008E9C" : stageDotColor(s)
+    }
+  })
+
+  const stageCounts = {}
+  stageOrder.forEach((s) => (stageCounts[s] = 0))
+  stageCounts["Retargeted"] = retargetedCount
+  stageCounts["Call"] = callCount
+  stageCounts["Meeting / Positive"] = meetingCount
+  stageCounts["Not Interested"] = notInterestedCount
+  Object.keys(otherCounts).forEach((s) => {
+    stageCounts[s] = (stageCounts[s] || 0) + otherCounts[s]
+  })
+
   const stageData = stageOrder
-    .map((s) => ({ k: s, v: stageCounts[s] }))
+    .map((s) => ({ k: s, v: stageCounts[s] || 0 }))
     .filter((d) => d.v > 0)
-  // Use unique company count so donut center matches #k-total for the same set
+  // Unique companies for center / KPI % — slice values may sum higher when
+  // Retargeted and Call overlap.
   const totalStages = cos.length
+  const arcTotal = stageData.reduce((sum, d) => sum + d.v, 0) || 1
   const stageEl = document.getElementById(stageId)
   if (stageEl && !totalStages) {
     stageEl.innerHTML =
@@ -3641,8 +3898,8 @@ function renderMetricCharts(ids, opts) {
     let angle = -Math.PI / 2
     const arcs = stageData
       .map((d) => {
-        const pct = d.v / totalStages
-        const sweep = pct * 2 * Math.PI
+        const pctOfCompanies = d.v / totalStages
+        const sweep = (d.v / arcTotal) * 2 * Math.PI
         const a0 = angle,
           a1 = angle + sweep
         angle = a1
@@ -3656,7 +3913,7 @@ function renderMetricCharts(ids, opts) {
             esc(d.k),
             [
               ["Companies", String(d.v)],
-              ["Share", Math.round(pct * 100) + "%"],
+              ["Share", Math.round(pctOfCompanies * 100) + "%"],
               ["Of pipeline", d.v + " / " + totalStages],
             ],
             stageCols[d.k],
@@ -3954,12 +4211,6 @@ function exportCSV() {
   a.click()
 }
 
-function changePage(dir) {
-  page += dir
-  renderTable()
-  const el = document.getElementById("pipeline-scroll")
-  if (el) el.scrollTop = 0
-}
 function clearFilters() {
   ;["search", "fm", "fs", "fc", "fg"].forEach(
     (id) => (document.getElementById(id).value = ""),
@@ -5053,14 +5304,7 @@ function renderContactsTab() {
   // Get all unique companies
   const allCos = getAllCompanies()
   const seen = {}
-  const SP = {
-    "Meeting / Positive": 6,
-    Call: 5,
-    Retargeted: 4,
-    "Not Interested": 3,
-    "Email Outreach": 2,
-    Prospected: 1,
-  }
+  const SP = STAGE_DISPLAY_PRIORITY
   allCos.forEach((r) => {
     const k = r.company.toLowerCase().trim()
     if (!seen[k]) {
@@ -5339,11 +5583,15 @@ function openStageDrop(event, company, month, id) {
   const drop = document.getElementById("stage-drop")
   renderStageDropOptions()
   positionStageDrop(drop, event.target)
-  const row = RAW_BASE.find((r) => r._id === id)
-  markStageDropCurrent(
-    drop,
-    row ? canonicalStageName(row.stage) || row.stage : "",
-  )
+  const companyName = company.replace(/&#39;/g, "'")
+  const row =
+    (id && RAW_BASE.find((r) => r._id === id)) ||
+    RAW_BASE.find(
+      (r) =>
+        (r.company || "").toLowerCase().trim() ===
+        companyName.toLowerCase().trim(),
+    )
+  markStageDropCurrent(drop, row ? getStage(row) : "")
   drop.classList.add("open")
 }
 
@@ -5368,10 +5616,14 @@ function setLeadPipelineStage(stage) {
   stageDropMode = "pipeline"
   leadStageTargetId = null
   if (!lead) return
+  stage = canonicalStageName(stage) || stage
 
-  // Pipeline Retargeted workflow: need 2+ outreach months
-  if (stage === "Retargeted" && leadMonthCount(lead) < 2) {
-    nsToast("Select another month to mark as Retargeted (same as Pipeline)")
+  // Pipeline Retargeted workflow: need 2+ outreach months, or a month
+  // that is already 2+ years old
+  if (stage === "Retargeted" && !monthsIndicateRetarget(leadMonthList(lead))) {
+    nsToast(
+      "Select another month (or a month 2+ years old) to mark as Retargeted",
+    )
     let anchor = null
     document
       .querySelectorAll("#lead-tbody .badge.editable, #lead-grid .pg-stage")
@@ -5394,11 +5646,20 @@ function setLeadPipelineStage(stage) {
   extras.stage = stage
   if (stage === "Retargeted") extras.is_retarget = true
   else if (stage === "Email Outreach") extras.is_retarget = false
+  else if (isRetargetOutcomeStage(stage)) {
+    if (monthsIndicateRetarget(leadMonthList(lead))) extras.is_retarget = true
+  }
   leadExtras[leadId] = extras
   saveLeadExtras()
   lead.stage = stage
   renderLeads()
-  nsToast(stage === "Retargeted" ? "Stage set to Retargeted" : "Stage updated")
+  nsToast(
+    stage === "Retargeted"
+      ? "Stage set to Retargeted"
+      : isRetargetOutcomeStage(stage)
+        ? "Stage set to " + (canonicalStageName(stage) || stage)
+        : "Stage updated",
+  )
 }
 
 async function setStage(stage) {
@@ -5414,20 +5675,41 @@ async function setStage(stage) {
     )
     return
   }
+  const canonical = canonicalStageName(stage) || stage
+  const row = RAW_BASE.find((r) => r._id === activeStageRowId)
   const stageMatch =
+    NS_LOOKUPS.stages.find((s) => s.status_name === canonical) ||
     NS_LOOKUPS.stages.find((s) => s.status_name === stage) ||
-    (stage === "Retargeted"
+    (canonical === "Retargeted"
       ? NS_LOOKUPS.stages.find((s) => s.status_name === "Meeting")
       : null)
   try {
-    await window.NsApi.updateCompany(activeStageRowId, {
-      stage_id: stageMatch ? stageMatch.id : null,
-    })
-    const row = RAW_BASE.find((r) => r._id === activeStageRowId)
-    if (row) {
-      row.stage = stage
-      await logStageAsActivity(row, stage)
+    const patch = { stage_id: stageMatch ? stageMatch.id : null }
+    if (canonical === "Retargeted") patch.is_retarget = 1
+    else if (canonical === "Email Outreach") patch.is_retarget = 0
+    else if (isRetargetOutcomeStage(canonical) && row) {
+      if (monthsIndicateRetarget(companyMonthLabels(row))) patch.is_retarget = 1
     }
+    // Sync every month-row for this company so Not Interested sticks the same
+    // way as Meeting / Positive (sibling rows otherwise stay Retargeted).
+    const nk = row ? (row.company || "").toLowerCase().trim() : ""
+    let targets = nk
+      ? RAW_BASE.filter(
+          (r) => (r.company || "").toLowerCase().trim() === nk && r._id,
+        )
+      : []
+    if (!targets.length && activeStageRowId) {
+      targets = [{ _id: activeStageRowId }]
+    }
+    for (const sib of targets) {
+      await window.NsApi.updateCompany(sib._id, patch)
+      const local = RAW_BASE.find((r) => r._id === sib._id)
+      if (local) {
+        local.stage = canonical
+        if (patch.is_retarget != null) local.is_retarget = !!patch.is_retarget
+      }
+    }
+    if (row) await logStageAsActivity(row, canonical)
     applyFilters()
     if (document.getElementById("panel-weekly")) {
       comms = comms.filter(
@@ -5437,7 +5719,11 @@ async function setStage(stage) {
       saveComms()
       renderWeekly()
     }
-    nsToast("Stage updated")
+    nsToast(
+      isRetargetOutcomeStage(canonical)
+        ? "Stage set to " + canonical
+        : "Stage updated",
+    )
   } catch (err) {
     nsToast(err instanceof Error ? err.message : "Update failed", "error")
   }
@@ -5643,8 +5929,9 @@ async function saveCompany() {
     stageId = fallback ? Number(fallback.id) : null
   }
   const stageName =
-    stageSel.options[stageSel.selectedIndex]?.textContent.trim() ||
-    "Email Outreach"
+    canonicalStageName(
+      stageSel.options[stageSel.selectedIndex]?.textContent.trim() || "",
+    ) || "Email Outreach"
 
   const payload = {
     company_name: name,
@@ -5653,6 +5940,13 @@ async function saveCompany() {
     stage_id: stageId,
     month: monthVal,
     status_detail: statusVal || null,
+  }
+
+  // Un-hide if this name was soft-deleted locally (same as convertLead)
+  const nkSave = name.toLowerCase().trim()
+  if (deletedCos[nkSave]) {
+    delete deletedCos[nkSave]
+    saveDeleted()
   }
 
   try {
@@ -5671,6 +5965,7 @@ async function saveCompany() {
       // Response shape unexpected — reload from API so the new row still appears
       RAW_BASE = await loadCompaniesFromApi()
       closeCoModal()
+      if (!wasEdit) clearPipelineFiltersForNewCompany()
       sortCol = "_id"
       sortDir = -1
       page = 1
@@ -5772,12 +6067,23 @@ async function saveCompany() {
       .value.trim()
     if (contactName || contactEmail || contactPhone) {
       try {
-        await window.NsApi.createContact({
+        const createdContact = await window.NsApi.createContact({
           company_id: savedId,
           contact_name: contactName || name,
           email: contactEmail || null,
           phone: contactPhone || null,
         })
+        const nk2 = name.toLowerCase().trim()
+        if (!contacts[nk2]) contacts[nk2] = []
+        contacts[nk2].unshift({
+          id:
+            createdContact && (createdContact.id ?? createdContact.contact_id),
+          name: contactName || name,
+          title: "",
+          email: contactEmail || "",
+          phone: contactPhone || "",
+        })
+        saveContacts()
       } catch (err) {
         /* contact is best-effort */
       }
@@ -5795,22 +6101,57 @@ async function saveCompany() {
       page = 1
     }
 
-    // Refresh from API so pipeline always matches the server
+    // Refresh from API so pipeline matches the server — keep mapped row if
+    // the list response briefly omits the new company.
     try {
-      RAW_BASE = await loadCompaniesFromApi()
+      const fresh = await loadCompaniesFromApi()
+      const stillThere = fresh.some(
+        (r) =>
+          Number(r._id) === Number(mapped._id) ||
+          (r.company || "").toLowerCase().trim() === nkSave,
+      )
+      if (stillThere) RAW_BASE = fresh
+      else RAW_BASE = [...fresh.filter((r) => r._id !== mapped._id), mapped]
     } catch (e) {
       /* keep local mapped row */
     }
 
     closeCoModal()
+    if (!wasEdit) clearPipelineFiltersForNewCompany()
     populate()
     applyFilters()
     populateLeadFilters()
     if (typeof renderLeads === "function") renderLeads()
+    if (!wasEdit && typeof switchTab === "function" && curTab !== "pipeline") {
+      switchTab("pipeline")
+    }
     nsToast(wasEdit ? "Company updated" : "Company added")
   } catch (err) {
     nsToast(err instanceof Error ? err.message : "Save failed", "error")
   }
+}
+
+/** Clear search / month / stage / KPI filters so a newly added company is visible. */
+function clearPipelineFiltersForNewCompany() {
+  ;["search", "fm", "fs", "fc", "fg"].forEach((id) => {
+    const el = document.getElementById(id)
+    if (el) el.value = ""
+  })
+  if (typeof syncPipelineStageLabel === "function") syncPipelineStageLabel()
+  if (typeof syncPipelineMgmtLabel === "function") syncPipelineMgmtLabel()
+  if (typeof syncPipelineCountryLabel === "function") syncPipelineCountryLabel()
+  if (typeof syncMonthFilterLabel === "function") syncMonthFilterLabel()
+  if (typeof closePipelineStageDrop === "function") closePipelineStageDrop()
+  if (typeof closePipelineMgmtDrop === "function") closePipelineMgmtDrop()
+  if (typeof closePipelineCountryDrop === "function") closePipelineCountryDrop()
+  if (typeof closeMonthFilterDrop === "function") closeMonthFilterDrop()
+  kpiActiveFilter = ""
+  document
+    .querySelectorAll(".kpi.clickable")
+    .forEach((k) => k.classList.remove("kpi-active"))
+  sortCol = "_id"
+  sortDir = -1
+  page = 1
 }
 
 // NOTES
@@ -6131,6 +6472,7 @@ if (!window.__nsKeydownBound) {
 const TYPE_LABEL = {
   call: "Call",
   ads: "Ads",
+  factors: "Factors",
   email: "Email",
   whatsapp: "WhatsApp",
   linkedin: "LinkedIn",
@@ -6145,6 +6487,8 @@ const TYPE_LABEL = {
 const TYPE_ICON_SVG = {
   call: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
   ads: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-5v12L3 13v-2z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>',
+  factors:
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
   email:
     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>',
   meeting:
@@ -6170,6 +6514,7 @@ function activityTitle(c) {
   const co = (c.company || "").trim()
   if (c.type === "call") return co ? `Called ${co}` : "Call logged"
   if (c.type === "ads") return co ? `Ads — ${co}` : "Ads logged"
+  if (c.type === "factors") return co ? `Factors — ${co}` : "Factors logged"
   if (c.type === "email") return co ? `Email sent to ${co}` : "Email sent"
   if (c.type === "meeting") {
     return co ? `Meeting report — ${co}` : "Meeting report"
@@ -6627,6 +6972,12 @@ async function addComm() {
         renderTable()
         updateKPIs()
       }
+      if (type === "factors") {
+        const nk = company.toLowerCase().trim()
+        factorsActivityIdByCompany[nk] = created.id
+        renderTable()
+        updateKPIs()
+      }
       nsToast("Activity logged")
     }
     saveComms()
@@ -6654,6 +7005,7 @@ function openEditComm(id) {
   const allowed = [
     "call",
     "ads",
+    "factors",
     "email",
     "meeting",
     "task",
@@ -6709,6 +7061,14 @@ async function deleteComm(id) {
       const nk = (removed.company || "").toLowerCase().trim()
       if (nk && adsActivityIdByCompany[nk] === id) {
         delete adsActivityIdByCompany[nk]
+      }
+      renderTable()
+      updateKPIs()
+    }
+    if (removed.type === "factors") {
+      const nk = (removed.company || "").toLowerCase().trim()
+      if (nk && factorsActivityIdByCompany[nk] === id) {
+        delete factorsActivityIdByCompany[nk]
       }
       renderTable()
       updateKPIs()
@@ -8286,20 +8646,24 @@ function leadMonthCount(lead) {
 
 /**
  * Same Retargeted rules as Pipeline getStage():
- * 2+ months (or is_retarget) ⇒ Retargeted; Meeting / Positive & Not Interested kept as-is.
+ * 2+ months selected or 2+ years aged ⇒ Retargeted;
+ * Meeting Scheduled / Not Interested / Prospected kept as-is.
  */
 function getLeadStage(lead) {
   if (!lead) return "Email Outreach"
   const extras = leadExtras[lead.id] || {}
   let s =
-    lead.stage === "Prospected"
-      ? "Email Outreach"
-      : lead.stage || extras.stage || ""
-  s = canonicalStageName(s) || s
+    canonicalStageName(lead.stage || extras.stage || "") ||
+    lead.stage ||
+    extras.stage ||
+    ""
   const keepAsIs =
-    s === "Meeting / Positive" || s === "Call" || s === "Not Interested"
+    s === "Meeting / Positive" ||
+    s === "Call" ||
+    s === "Not Interested" ||
+    s === "Prospected"
   if (keepAsIs) return s
-  if (extras.is_retarget || leadMonthCount(lead) >= 2) return "Retargeted"
+  if (monthsIndicateRetarget(leadMonthList(lead))) return "Retargeted"
   if (s === "Retargeted") return "Email Outreach"
   return s || "Email Outreach"
 }
@@ -8400,7 +8764,7 @@ function renderLeadGridCard(r) {
         <span class="pg-tile-lbl">Type</span>
         <span class="pg-tile-val" title="${esc(type)}">${esc(type)}</span>
       </div>
-      <div class="pg-tile" role="button" tabindex="0" onclick="openLeadMonthPicker(event,${leadId})" title="Click to edit months — 2+ months = Retargeted">
+      <div class="pg-tile" role="button" tabindex="0" onclick="openLeadMonthPicker(event,${leadId})" title="Click to edit months — 2+ months or 2+ years old = Retargeted">
         <span class="pg-tile-lbl">Month</span>
         <span class="pg-tile-val">${monthLine}${monthExtra}</span>
       </div>
@@ -8480,7 +8844,7 @@ function renderLeadTableRow(r) {
     : allMonths[0] || monthLabelNow()
   const otherMonths = allMonths.filter((m) => m && m !== curMonth)
   const monthDisplay =
-    `<span class="mtag editable" onclick="openLeadMonthPicker(event,${leadId})" title="Click to edit months — 2+ months = Retargeted">${esc(curMonth || "—")}</span>` +
+    `<span class="mtag editable" onclick="openLeadMonthPicker(event,${leadId})" title="Click to edit months — 2+ months or 2+ years old = Retargeted">${esc(curMonth || "—")}</span>` +
     (otherMonths.length
       ? `<span style="font-size:.55rem;color:#64748b;display:block;margin-top:2px">${otherMonths.map((m) => `+${esc(m)}`).join(", ")}</span>`
       : "")
@@ -8703,24 +9067,19 @@ function exportData() {
   allRows.forEach((r) => {
     const nk = (r.company || "").toLowerCase().trim()
     if (!nk) return
-    if (!monthsByNk[nk]) monthsByNk[nk] = { months: new Set(), ret: false }
+    if (!monthsByNk[nk]) monthsByNk[nk] = { months: new Set() }
     if (isValidMonthLabel(r.month)) monthsByNk[nk].months.add(r.month)
-    if (r.is_retarget || r.stage === "Retargeted") monthsByNk[nk].ret = true
   })
   Object.keys(extraMonths || {}).forEach((nk) => {
-    if (!monthsByNk[nk]) monthsByNk[nk] = { months: new Set(), ret: false }
+    if (!monthsByNk[nk]) monthsByNk[nk] = { months: new Set() }
     ;(extraMonths[nk] || []).forEach((m) => {
       if (isValidMonthLabel(m)) monthsByNk[nk].months.add(m)
     })
   })
   const retargetedSet = new Set()
   Object.keys(monthsByNk).forEach((nk) => {
-    if (
-      (monthsByNk[nk].months && monthsByNk[nk].months.size >= 2) ||
-      monthsByNk[nk].ret
-    ) {
-      retargetedSet.add(nk)
-    }
+    const list = [...(monthsByNk[nk].months || [])]
+    if (monthsIndicateRetarget(list)) retargetedSet.add(nk)
   })
 
   const companies = dedupeCompaniesHighestStage(allRows).slice()
@@ -8730,7 +9089,7 @@ function exportData() {
     return (a.company || "").localeCompare(b.company || "")
   })
 
-  // Columns match Pipeline list: Company, Country, Type, Month, Stage, Call, Ads, Follow-up, Notes
+  // Columns match Pipeline list: Company, Country, Type, Month, Stage, Call, Ads, Factors, Follow-up, Notes
   const pipelineHeaders = [
     "Company",
     "Code",
@@ -8741,6 +9100,7 @@ function exportData() {
     "Stage",
     "Call",
     "Ads",
+    "Factors",
     "Follow-up",
     "Notes",
     "Status Detail",
@@ -8772,6 +9132,7 @@ function exportData() {
     const stage = getStage(r) || ""
     const called = isCall(nk) ? "Yes" : "No"
     const adsLogged = isAds(nk) ? "Yes" : "No"
+    const factorsLogged = isFactors(nk) ? "Yes" : "No"
     const fu = r._follow_up || followUps[nk] || ""
     return [
       r.company || "",
@@ -8783,6 +9144,7 @@ function exportData() {
       stage,
       called,
       adsLogged,
+      factorsLogged,
       fu,
       noteArr.join(" | "),
       r.status || "",
@@ -8812,6 +9174,12 @@ function exportData() {
     [
       "Companies with Ads",
       companies.filter((r) => isAds((r.company || "").toLowerCase().trim()))
+        .length,
+    ],
+    ["Factors", countFactorsActivities(null)],
+    [
+      "Companies with Factors",
+      companies.filter((r) => isFactors((r.company || "").toLowerCase().trim()))
         .length,
     ],
     [
@@ -8897,6 +9265,11 @@ function exportData() {
       "Ads",
       pipelineHeaders,
       byCategory((r) => isAds((r.company || "").toLowerCase().trim())),
+    ) +
+    sheet(
+      "Factors",
+      pipelineHeaders,
+      byCategory((r) => isFactors((r.company || "").toLowerCase().trim())),
     ) +
     sheet(
       "Meetings Positive",

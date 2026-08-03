@@ -10,7 +10,7 @@ export const dashboardPanelHtml = `
     </div>
   </div>
 
-  <div class="kpi-bar">
+  <div class="kpi-bar" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;">
     <div class="kpi clickable" onclick="kpiClick('')" id="kpi-total">
       <div class="kpi-icon blue">👥</div>
       <div class="kpi-body">
@@ -44,6 +44,19 @@ export const dashboardPanelHtml = `
         <div class="num" id="k-ads">—</div>
       </div>
     </div>
+    <div class="kpi indigo clickable" onclick="kpiClick('Factors')" id="kpi-factors" title="Companies with logged factors — click to list them">
+      <div class="kpi-icon indigo" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+          <polyline points="2 17 12 22 22 17"/>
+          <polyline points="2 12 12 17 22 12"/>
+        </svg>
+      </div>
+      <div class="kpi-body">
+        <div class="kpi-top"><span class="lbl">Factors</span></div>
+        <div class="num" id="k-factors">—</div>
+      </div>
+    </div>
     <div class="kpi green clickable" onclick="kpiClick('Meeting / Positive')" id="kpi-pos">
       <div class="kpi-icon green">📅</div>
       <div class="kpi-body">
@@ -58,7 +71,7 @@ export const dashboardPanelHtml = `
         <div class="num" id="k-neg">—</div>
       </div>
     </div>
-    <div class="kpi red2 clickable" onclick="kpiClick('__followup__')" id="kpi-od" title="Companies with a follow-up date set">
+    <div class="kpi red2 clickable" onclick="kpiClick('__followup__')" id="kpi-od" title="Companies with a follow-up date set" style="width:100%;max-width:100%;min-width:0;flex:none;">
       <div class="kpi-icon red">📌</div>
       <div class="kpi-body">
         <div class="kpi-top"><span class="lbl">Follow-up</span></div>
@@ -70,7 +83,7 @@ export const dashboardPanelHtml = `
   <div class="charts-grid dashboard-only">
     <div class="chart-card">
       <div class="chart-title">Pipeline by Stage</div>
-      <div class="chart-subtitle">Same counts as the KPI cards (Call = logged calls)</div>
+      <div class="chart-subtitle">Share of companies by stage</div>
       <div id="dash-chart-stage" class="chart-body chart-donut-wrap analytics-donut"></div>
     </div>
     <div class="chart-card">
@@ -171,6 +184,7 @@ export const dashboardPanelHtml = `
           <th onclick="sortBy('stage')">Stage <span class="sort-icon">↕</span> <span class="th-hint">▾ click to edit</span></th>
           <th>Call</th>
           <th>Ads</th>
+          <th>Factors</th>
           <th onclick="sortBy('_follow_up')">Follow-up <span class="sort-icon">↕</span></th>
           <th>Notes</th>
           <th>Actions</th>

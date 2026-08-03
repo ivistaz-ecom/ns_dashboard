@@ -47,6 +47,7 @@ export const weeklyPanelHtml = `
       <button type="button" class="wk-tab active" data-filter="all" onclick="setWeeklyFilter('all')">All Activity</button>
       <button type="button" class="wk-tab" data-filter="call" onclick="setWeeklyFilter('call')">Calls</button>
       <button type="button" class="wk-tab" data-filter="ads" onclick="setWeeklyFilter('ads')">Ads</button>
+      <button type="button" class="wk-tab" data-filter="factors" onclick="setWeeklyFilter('factors')">Factors</button>
       <button type="button" class="wk-tab" data-filter="email" onclick="setWeeklyFilter('email')">Emails</button>
       <button type="button" class="wk-tab" data-filter="meeting" onclick="setWeeklyFilter('meeting')">Meetings</button>
       <button type="button" class="wk-tab" data-filter="whatsapp" onclick="setWeeklyFilter('whatsapp')">WhatsApp</button>
@@ -66,6 +67,7 @@ export const weeklyPanelHtml = `
         <select class="cf-type" id="cf-type">
           <option value="call">Call</option>
           <option value="ads">Ads</option>
+          <option value="factors">Factors</option>
           <option value="email">Email</option>
           <option value="meeting">Meeting</option>
           <option value="task">Task</option>

@@ -416,6 +416,10 @@
   display: none !important;
 }
 
+.dashboard-root .main-content.view-pipeline #panel-dashboard {
+  overflow: hidden;
+}
+
 .dashboard-root .pipeline-only {
   display: none !important;
 }
@@ -493,10 +497,10 @@
   background: rgba(100, 116, 139, 0.5);
 }
 
-/* ── KPI cards ── */
+/* ── KPI cards — always 4 equal columns (2 rows of 4) ── */
 .dashboard-root .kpi-bar {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
   gap: 12px;
   padding: 8px 24px 16px;
   flex-shrink: 0;
@@ -513,14 +517,16 @@
   transition: all 0.2s ease;
   position: relative;
   overflow: hidden;
-  flex: 1 1 0;
-  min-width: 140px;
+  min-width: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  flex: none !important;
+  box-sizing: border-box;
 }
 
 @media (max-width: 900px) {
-  .dashboard-root .kpi {
-    flex: 1 1 calc(50% - 6px);
-    min-width: calc(50% - 6px);
+  .dashboard-root .kpi-bar {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 }
 
@@ -553,6 +559,14 @@
   color: #0891b2;
 }
 .dashboard-root .kpi-icon.cyan svg {
+  display: block;
+  flex-shrink: 0;
+}
+.dashboard-root .kpi-icon.indigo {
+  background: rgba(99, 102, 241, 0.14);
+  color: #4f46e5;
+}
+.dashboard-root .kpi-icon.indigo svg {
   display: block;
   flex-shrink: 0;
 }
@@ -1003,18 +1017,34 @@
 
 .dashboard-root .table-section .scroll {
   padding: 0;
-  max-height: 520px;
+  flex: 1;
+  min-height: 0;
+  /* Same fill behavior on every page — fixed 520px left a dead gap on page 1 */
+  max-height: none;
 }
 
 .dashboard-root .table-section .scroll table {
   border: none;
   border-radius: 0;
   box-shadow: none;
+  width: 100%;
+  height: auto;
+  table-layout: fixed;
+}
+
+/* Wider table so Company + equal cols have room */
+.dashboard-root #pipeline-table {
+  min-width: 1680px;
+}
+
+.dashboard-root #lead-table {
+  min-width: 1400px;
 }
 
 .dashboard-root .table-section .pgn {
   background: transparent;
-  padding: 12px 16px;
+  padding: 10px 16px;
+  flex-shrink: 0;
 }
 
 .dashboard-root .th-hint {
@@ -1895,8 +1925,10 @@
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  /* visible so sticky company column can pin while scrolling horizontally */
+  overflow: visible;
   box-shadow: var(--shadow-sm);
+  height: auto;
 }
 
 .dashboard-root thead th {
@@ -1926,6 +1958,7 @@
 .dashboard-root tbody tr {
   border-bottom: 1px solid var(--border);
   transition: background 0.12s ease;
+  height: auto;
 }
 
 .dashboard-root tbody tr:last-child {
@@ -1945,6 +1978,11 @@
 .dashboard-root .cn {
   font-weight: 600;
   color: var(--text);
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Badges ── */
@@ -2030,13 +2068,83 @@
   white-space: nowrap;
 }
 
-/* Month is the 4th of 9 columns in both the pipeline and leads tables. */
-.dashboard-root #pipeline-table th:nth-child(4),
-.dashboard-root #pipeline-table td:nth-child(4),
-.dashboard-root #lead-table th:nth-child(4),
-.dashboard-root #lead-table td:nth-child(4) {
-  width: 1%;
+/* Equal-ish columns, with Company taking more room */
+.dashboard-root #pipeline-table th,
+.dashboard-root #pipeline-table td {
+  width: calc(100% / 12);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 12px 14px;
+  vertical-align: middle;
+}
+
+.dashboard-root #pipeline-table th:nth-child(1),
+.dashboard-root #pipeline-table td:nth-child(1) {
+  width: calc(100% / 6); /* ~2× other columns */
+}
+
+.dashboard-root #lead-table th,
+.dashboard-root #lead-table td {
+  width: calc(100% / 10);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 12px 14px;
+  vertical-align: middle;
+}
+
+.dashboard-root #lead-table th:nth-child(1),
+.dashboard-root #lead-table td:nth-child(1) {
+  width: calc(100% / 5); /* ~2× other columns */
+}
+
+/* Company — sticky */
+.dashboard-root #pipeline-table th:nth-child(1),
+.dashboard-root #pipeline-table td:nth-child(1),
+.dashboard-root #lead-table th:nth-child(1),
+.dashboard-root #lead-table td:nth-child(1) {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 220px;
+  background: var(--bg-surface);
+  box-shadow: 1px 0 0 var(--border);
+}
+
+.dashboard-root #pipeline-table th:nth-child(1),
+.dashboard-root #lead-table th:nth-child(1) {
+  z-index: 3;
+  background: var(--bg-elevated);
+}
+
+.dashboard-root #pipeline-table tbody tr:hover td:nth-child(1),
+.dashboard-root #lead-table tbody tr:hover td:nth-child(1) {
+  background: var(--bg-surface-hover);
+}
+
+/* Call / Ads / Factors — center icons within equal cells */
+.dashboard-root #pipeline-table th:nth-child(6),
+.dashboard-root #pipeline-table td:nth-child(6),
+.dashboard-root #pipeline-table th:nth-child(7),
+.dashboard-root #pipeline-table td:nth-child(7),
+.dashboard-root #pipeline-table th:nth-child(8),
+.dashboard-root #pipeline-table td:nth-child(8),
+.dashboard-root #lead-table th:nth-child(6),
+.dashboard-root #lead-table td:nth-child(6) {
+  text-align: center;
+}
+
+/* Month cell can wrap the +extra months line */
+.dashboard-root #pipeline-table td:nth-child(4),
+.dashboard-root #lead-table td:nth-child(4) {
+  white-space: normal;
+}
+
+/* Notes can wrap / show preview */
+.dashboard-root #pipeline-table td:nth-child(10),
+.dashboard-root #lead-table td:nth-child(8) {
+  white-space: normal;
 }
 
 .dashboard-root .custom-tag {
@@ -2054,7 +2162,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 5px;
+  margin-top: 4px;
 }
 
 .dashboard-root .cell-chip {
@@ -2106,15 +2214,6 @@
 
 .dashboard-root .cell-chip-count {
   font-variant-numeric: tabular-nums;
-}
-
-/* Notes is the 8th of 9 columns in both the pipeline and leads tables. */
-.dashboard-root #pipeline-table th:nth-child(8),
-.dashboard-root #pipeline-table td:nth-child(8),
-.dashboard-root #lead-table th:nth-child(8),
-.dashboard-root #lead-table td:nth-child(8) {
-  width: 130px;
-  max-width: 130px;
 }
 
 .dashboard-root .nprev {
@@ -2921,6 +3020,14 @@
   background: #dbeafe;
   color: #2563eb;
 }
+.dashboard-root .tl-icon.ti-ads {
+  background: rgba(6, 182, 212, 0.16);
+  color: #0891b2;
+}
+.dashboard-root .tl-icon.ti-factors {
+  background: rgba(99, 102, 241, 0.16);
+  color: #4f46e5;
+}
 .dashboard-root .tl-icon.ti-email {
   background: #dcfce7;
   color: #16a34a;
@@ -2986,6 +3093,14 @@
 .dashboard-root .ct-call {
   background: #dbeafe;
   color: #2563eb;
+}
+.dashboard-root .ct-ads {
+  background: rgba(6, 182, 212, 0.16);
+  color: #0891b2;
+}
+.dashboard-root .ct-factors {
+  background: rgba(99, 102, 241, 0.16);
+  color: #4f46e5;
 }
 .dashboard-root .ct-email {
   background: #dcfce7;
