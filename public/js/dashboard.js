@@ -34,6 +34,9 @@ async function loadCompaniesFromApi() {
     }
     const items = (res && res.items) || []
     items.forEach((r) => {
+      const lifecycle = String(r.status || "").toLowerCase()
+      const isLifecycle = lifecycle === "active" || lifecycle === "inactive"
+      const rawStage = String(r.stage_name || "").trim()
       rows.push({
         _id: r.id,
         code: r.company_code || "",
@@ -41,11 +44,16 @@ async function loadCompaniesFromApi() {
         country: r.country_name || "",
         mgmt_type: r.mgmt_type_name || "",
         status: r.status_detail || "",
-        stage: canonicalStageName(r.stage_name || ""),
+        stage: canonicalStageName(rawStage),
+        _raw_stage: rawStage,
+        _stage_id: r.stage_id != null ? Number(r.stage_id) : null,
         month: r.month || "",
         date: r.week_label || "",
         reply_status: r.reply_status || "",
         is_retarget: !!Number(r.is_retarget),
+        is_deleted: !!Number(r.is_deleted),
+        // Company row lifecycle (active / inactive) — separate from status_detail
+        record_status: isLifecycle ? lifecycle : "active",
       })
     })
     if (items.length < perPage) break
@@ -154,21 +162,21 @@ async function loadLeadsFromApi() {
   return rows
 }
 const STAGE_ORDER = {
-  Retargeted: 0,
+  Prospected: 0,
   "Email Outreach": 1,
-  Call: 2,
-  "Meeting / Positive": 3,
-  "Not Interested": 4,
-  Prospected: 5,
+  Retargeted: 2,
+  Call: 3,
+  "Meeting / Positive": 4,
+  "Not Interested": 5,
 }
 
 /** Fallback when lookups haven't loaded yet (matches current `stage` table). */
 const DASHBOARD_STAGE_FALLBACK = [
+  "Prospected",
   "Email Outreach",
   "Retargeted",
   "Meeting / Positive",
   "Not Interested",
-  "Prospected",
   "Call",
 ]
 
@@ -200,7 +208,7 @@ const STAGE_DISPLAY_PRIORITY = {
  * Set status = inactive → it disappears. No frontend code changes needed.
  */
 
-/** Legacy stage names → current canonical name. Not Interested is unchanged. */
+/** Legacy stage names → current canonical name. Prospected stays its own stage. */
 function canonicalStageName(s) {
   if (s === "Meeting" || s === "2nd Round") return "Retargeted"
   if (s === "Meeting Scheduled") return "Meeting / Positive"
@@ -245,6 +253,44 @@ function getActiveStageLookups() {
   })
 }
 
+/** True when this stage name is enabled in Settings (status = active). */
+function isActiveStageName(stageName) {
+  const raw = String(stageName || "").trim()
+  const canonical = canonicalStageName(raw) || raw
+  if (!canonical) return true
+  const lookups = NS_LOOKUPS.stages || []
+  if (!lookups.length) return true
+
+  const row =
+    lookups.find((s) => String(s.status_name || "").trim() === raw) ||
+    lookups.find(
+      (s) =>
+        canonicalStageName(String(s.status_name || "").trim()) === canonical,
+    ) ||
+    (canonical === "Retargeted"
+      ? lookups.find((s) => String(s.status_name || "").trim() === "Meeting")
+      : null)
+
+  if (row) {
+    return (
+      String(row.status != null ? row.status : "active").toLowerCase() !==
+      "inactive"
+    )
+  }
+  // Computed display stages (Retargeted from months, Call from activity)
+  if (canonical === "Retargeted" || canonical === "Call") return true
+  const active = getDashboardStageOptions()
+  return !active.length || active.includes(canonical)
+}
+
+/** Soft-deleted / inactive company rows stay out of pipeline + KPIs. */
+function isActiveCompanyRecord(r) {
+  if (!r) return false
+  if (r.is_deleted) return false
+  const st = String(r.record_status || "active").toLowerCase()
+  return st !== "inactive"
+}
+
 /**
  * Every row in `type` (management type) with status = 'active' — used site-wide.
  * Same rule as stages: inactive rows are hidden from filters and pickers.
@@ -287,9 +333,14 @@ function getDashboardCountryOptions() {
 }
 
 function getDashboardStageOptions() {
-  const fromApi = getActiveStageLookups().map((s) =>
-    canonicalStageName(String(s.status_name || "").trim()),
-  )
+  // Use the Settings stage name as-is (Prospected stays Prospected).
+  // Only apply legacy renames (Meeting → Retargeted, etc.).
+  const fromApi = getActiveStageLookups().map((s) => {
+    const raw = String(s.status_name || "").trim()
+    if (raw === "Meeting" || raw === "2nd Round") return "Retargeted"
+    if (raw === "Meeting Scheduled") return "Meeting / Positive"
+    return raw
+  })
   const seen = new Set()
   const names = []
   ;(fromApi.length ? fromApi : DASHBOARD_STAGE_FALLBACK.slice()).forEach(
@@ -424,10 +475,32 @@ function isActiveLeadRecord(lead) {
   return recordStatus !== "inactive"
 }
 
+/** Normalize list endpoints that return either an array or `{ items: [] }`. */
+function lookupListItems(data) {
+  if (Array.isArray(data)) return data
+  if (data && Array.isArray(data.items)) return data.items
+  return []
+}
+
 async function loadLookups() {
   if (!window.NsApi) return
   try {
-    NS_LOOKUPS = await window.NsApi.getLookups()
+    const data = await window.NsApi.getLookups()
+    NS_LOOKUPS = {
+      countries: (data && data.countries) || [],
+      stages: (data && data.stages) || [],
+      mgmt_types: (data && data.mgmt_types) || [],
+    }
+    // Stages only — country/type list endpoints are paginated and break filters.
+    if (typeof window.NsApi.listStages === "function") {
+      try {
+        const stageData = await window.NsApi.listStages()
+        const stages = lookupListItems(stageData)
+        if (stages.length) NS_LOOKUPS.stages = stages
+      } catch (stageErr) {
+        console.warn("[dashboard] listStages overlay skipped:", stageErr)
+      }
+    }
   } catch (err) {
     console.error("[dashboard] failed to load lookups:", err)
   }
@@ -852,7 +925,7 @@ function mergePipelineCommsIntoTracker() {
 
   const extras = []
   Object.values(byNk).forEach((r) => {
-    // Use raw stage so Prospected is not collapsed into Email Outreach
+    // Use raw stage name (Prospected is its own stage)
     const stage = r.stage || ""
     const monthLabel = String(r.month || "").trim()
     const weekLabel = String(r.date || "").trim()
@@ -1023,7 +1096,7 @@ function getAllCompanies() {
       company: l.name,
       country: l.country || "",
       mgmt: l.mgmt || "",
-      stage: "Prospected",
+      stage: "Email Outreach",
       month: "Lead",
       status_detail: "",
       is_retarget: false,
@@ -1049,7 +1122,7 @@ function getAllCompanies() {
         _id: c._id || resolvedId || null,
         country: c.country || "",
         mgmt_type: c.mgmt_type || c.mgmt || "",
-        stage: c.stage || "Prospected",
+        stage: canonicalStageName(c.stage || "") || "Email Outreach",
         month: c.month || "",
         status: c.status || c.status_detail || "",
       }
@@ -1065,8 +1138,16 @@ function getAllCompanies() {
   )
   return [...RAW_BASE, ...customs, ...filteredLeads].filter((r) => {
     if (deletedCos[(r.company || "").toLowerCase().trim()]) return false
+    if (!isActiveCompanyRecord(r)) return false
     // Settings: only show rows for enabled (active) countries site-wide
-    return isActiveCountryName(r.country)
+    if (!isActiveCountryName(r.country)) return false
+    // Settings: hide companies whose stage is disabled (inactive)
+    const displayStage = getStage(r)
+    if (!isActiveStageName(displayStage)) return false
+    // Also drop if stored stage itself is inactive (even before retarget remap)
+    if (r.stage && !isActiveStageName(r.stage) && displayStage === r.stage)
+      return false
+    return true
   })
 }
 
@@ -1148,17 +1229,27 @@ function companyIsRetargeted(r) {
 
 function getStage(r) {
   let s = canonicalStageName((r && r.stage) || "") || (r && r.stage) || ""
-  // Meeting Scheduled / Not Interested are retarget outcomes — keep them.
-  // Call & Prospected stay as-is. Otherwise 2+ months or 2+ years ⇒ Retargeted.
+  // Meeting / Positive, Not Interested & Call stay as-is.
+  // Prospected stays Prospected unless months force Retargeted.
   const keepAsIs =
-    s === "Meeting / Positive" ||
-    s === "Call" ||
-    s === "Not Interested" ||
-    s === "Prospected"
+    s === "Meeting / Positive" || s === "Call" || s === "Not Interested"
   if (keepAsIs) return s
   if (companyIsRetargeted(r)) return "Retargeted"
   if (s === "Retargeted") return "Email Outreach"
   return s || "Email Outreach"
+}
+
+function storedStageName(r) {
+  return canonicalStageName((r && r.stage) || "") || (r && r.stage) || ""
+}
+
+/** Stage filter match — compares display stage to the selected filter. */
+function rowMatchesStageFilter(r, want) {
+  if (!r || !want) return true
+  const wantCanon = canonicalStageName(want) || want
+  const es = getStage(r)
+  if (es !== wantCanon) return false
+  return isActiveStageName(es)
 }
 
 function activateTab(t) {
@@ -1521,7 +1612,7 @@ function onDashboardDateChange(event) {
 function bc(s) {
   return (
     {
-      Prospected: "b-1",
+      Prospected: "b-p",
       "Email Outreach": "b-1",
       Retargeted: "b-r",
       Call: "b-c",
@@ -1567,8 +1658,6 @@ function applyFilters(keepPage) {
   const fc = document.getElementById("fc").value
   const fg = document.getElementById("fg").value
   // Pre-compute retargeted set: 2+ months selected OR 2+ years aged only.
-  // The stored stage / is_retarget flag is ignored so a single current month
-  // never stays "Retargeted" after other months were removed.
   const monthsByNk = {}
   all.forEach((r) => {
     const nk = r.company.toLowerCase().trim()
@@ -1584,8 +1673,17 @@ function applyFilters(keepPage) {
     const total = [...new Set([...monthsByNk[nk].months, ...extra])]
     if (monthsIndicateRetarget(total)) retargetedNKs.add(nk)
   })
+
+  // Stage KPI filters run after unique merge.
+  const stageKpi =
+    kpiActiveFilter === "Retargeted" ||
+    kpiActiveFilter === "Meeting / Positive" ||
+    kpiActiveFilter === "Not Interested"
+      ? kpiActiveFilter
+      : ""
+  const earlyStage = !stageKpi ? canonicalStageName(fs) || fs || "" : ""
+
   filtered = all.filter((r) => {
-    const es = getStage(r)
     const nk = r.company.toLowerCase().trim()
     if (
       q &&
@@ -1594,31 +1692,21 @@ function applyFilters(keepPage) {
       !(r._contact_name || "").toLowerCase().includes(q)
     )
       return false
-    // Retargeted spans several months, so its KPI overrides the month + stage
-    // dropdowns but still respects country / type. Every row of a candidate
-    // company is kept here so the unique-mode merge below sees all its months.
-    const retKpi = kpiActiveFilter === "Retargeted"
-    if (retKpi && !retargetedNKs.has(nk)) return false
-    if (!retKpi) {
-      if (fm && r.month !== fm) return false
-      if (fs && es !== fs) return false
-    }
+    if (fm && r.month !== fm) return false
     if (fc && getField(r, "country") !== fc) return false
     if (fg && getField(r, "mgmt_type") !== fg) return false
-    if (retKpi) return true
-    // other KPI filters
+    if (earlyStage && !rowMatchesStageFilter(r, earlyStage)) return false
+    // Activity KPIs (not stage-based)
     if (kpiActiveFilter === "Call") return isCall(nk)
     if (kpiActiveFilter === "Ads") return isAds(nk)
     if (kpiActiveFilter === "Factors") return isFactors(nk)
-    if (kpiActiveFilter === "Meeting / Positive")
-      return es === "Meeting / Positive"
-    if (kpiActiveFilter === "Not Interested") return es === "Not Interested"
     if (kpiActiveFilter === "__followup__") {
       const fu = r._follow_up || followUps[nk] || ""
       return !!fu
     }
     return true
   })
+
   // Unique mode: one row per company, highest stage, all months noted
   if (uniqueMode) {
     const seen = {}
@@ -1633,8 +1721,7 @@ function applyFilters(keepPage) {
         }
       } else {
         seen[ck]._all_months.push(r.month)
-        if (r.is_retarget) seen[ck].is_retarget = true // carry retarget flag from any record
-        // Prefer the highest DB id so "newest first" sort stays correct
+        if (r.is_retarget) seen[ck].is_retarget = true
         if (r._id && (!seen[ck]._id || r._id > seen[ck]._id)) {
           seen[ck]._id = r._id
           if (r.code) seen[ck].code = r.code
@@ -1654,14 +1741,11 @@ function applyFilters(keepPage) {
             code: keptCode,
             _all_months: months,
             is_retarget: wasRet || !!r.is_retarget,
-            // Drop local-only flag once we have a real API row
             _custom: keptId ? false : !!(r._custom || seen[ck]._custom),
           }
         }
       }
     })
-    // Use ALL months from full dataset (not just filtered records) + extraMonths
-    // This ensures months always show correctly regardless of active filters
     filtered = Object.values(seen).map((r) => {
       const nk = r.company.toLowerCase().trim()
       const extra = extraMonths[nk] || []
@@ -1669,12 +1753,16 @@ function applyFilters(keepPage) {
       const allM = [...new Set([...rawAll, ...extra])].filter(isValidMonthLabel)
       return { ...r, _all_months: allM }
     })
-    // Narrow the company-wide candidate set to rows whose Stage badge really
-    // reads "Retargeted", so the list never shows another stage.
-    if (kpiActiveFilter === "Retargeted") {
-      filtered = filtered.filter((r) => getStage(r) === "Retargeted")
-    }
   }
+
+  // Final stage identity after merge
+  const wantStage = stageKpi || canonicalStageName(fs) || fs || ""
+  if (wantStage) {
+    filtered = filtered.filter((r) => rowMatchesStageFilter(r, wantStage))
+  } else {
+    filtered = filtered.filter((r) => isActiveStageName(getStage(r)))
+  }
+
   applySort()
   if (!keepPage) page = 1
   renderTable()
@@ -1793,6 +1881,7 @@ ${child(".pg-card.stage-b-c")}{border-top-color:#7c3aed !important}
 ${child(".pg-card.stage-b-m")}{border-top-color:#16a34a !important}
 ${child(".pg-card.stage-b-n")}{border-top-color:#dc2626 !important}
 ${child(".pg-card.stage-b-1")}{border-top-color:#008e9c !important}
+${child(".pg-card.stage-b-p")}{border-top-color:#64748b !important}
 ${child(".pg-card:hover")}{box-shadow:0 12px 28px rgba(15,23,42,.1) !important;transform:translateY(-2px);transition:box-shadow .18s ease,transform .18s ease}
 ${child(".pg-card.is-muted")}{opacity:.55}
 ${child(".pg-card-top")}{display:flex !important;align-items:center !important;justify-content:space-between !important;gap:8px !important}
@@ -3627,9 +3716,7 @@ function updateKPIs() {
         if (range.toOrd != null && ord > range.toOrd) return false
         return true
       })
-    const monthTotal = [
-      ...new Set([...monthsByNk[nk].months, ...extra]),
-    ]
+    const monthTotal = [...new Set([...monthsByNk[nk].months, ...extra])]
     if (monthsIndicateRetarget(monthTotal)) retSet.add(nk)
   })
   if (!onDash) retargetedNKs = retSet
@@ -3812,8 +3899,9 @@ function renderMetricCharts(ids, opts) {
   const all = opts.companies || getAllCompanies()
   const cos = dedupeCompaniesHighestStage(all)
 
-  // 1. Pipeline by Stage — Retargeted & Call match KPI cards (they can overlap:
-  // a company may be Retargeted and also have a logged call).
+  // 1. Pipeline by Stage — Retargeted / Meeting / Not Interested / Call match
+  // KPI cards. Call can overlap outcome stages (a company may be Retargeted
+  // and also have a logged call). Email / Prospected / etc. stay exclusive.
   const stageOrder = getDashboardStageOptions()
   cos.forEach((r) => {
     const s = getStage(r)
@@ -3834,7 +3922,6 @@ function renderMetricCharts(ids, opts) {
     ? "Email Outreach"
     : stageOrder[0] || "Email Outreach"
 
-  // Same formulas as updateKPIs() for Retargeted + Call
   let retargetedCount = 0
   let callCount = 0
   let meetingCount = 0
@@ -3848,8 +3935,8 @@ function renderMetricCharts(ids, opts) {
     if (stage === "Meeting / Positive") meetingCount++
     if (stage === "Not Interested") notInterestedCount++
 
-    // Remaining exclusive slices (Email / etc.) — skip KPI overlap stages and
-    // companies already represented by the Call KPI so Email isn't inflated.
+    // Exclusive remaining slices — skip KPI overlap stages and companies
+    // already represented by Call so Email / Prospected aren't inflated.
     if (
       stage === "Retargeted" ||
       stage === "Meeting / Positive" ||
@@ -3872,7 +3959,9 @@ function renderMetricCharts(ids, opts) {
   })
 
   const stageCounts = {}
-  stageOrder.forEach((s) => (stageCounts[s] = 0))
+  stageOrder.forEach((s) => {
+    stageCounts[s] = 0
+  })
   stageCounts["Retargeted"] = retargetedCount
   stageCounts["Call"] = callCount
   stageCounts["Meeting / Positive"] = meetingCount
@@ -3884,8 +3973,7 @@ function renderMetricCharts(ids, opts) {
   const stageData = stageOrder
     .map((s) => ({ k: s, v: stageCounts[s] || 0 }))
     .filter((d) => d.v > 0)
-  // Unique companies for center / KPI % — slice values may sum higher when
-  // Retargeted and Call overlap.
+  // Center = unique companies. Slice sum can be higher when Call overlaps.
   const totalStages = cos.length
   const arcTotal = stageData.reduce((sum, d) => sum + d.v, 0) || 1
   const stageEl = document.getElementById(stageId)
@@ -5922,17 +6010,24 @@ async function saveCompany() {
   const mgmtMatch = (NS_LOOKUPS.mgmt_types || []).find(
     (t) => String(t.id) === String(mgmtId),
   )
-  let stageId = stageSel.value ? Number(stageSel.value) : null
+  const stageName =
+    canonicalStageName(
+      stageSel.options[stageSel.selectedIndex]?.textContent.trim() || "",
+    ) || "Email Outreach"
+  const stageByName = (NS_LOOKUPS.stages || []).find(
+    (s) => s.status_name === stageName,
+  )
+  let stageId = stageByName
+    ? Number(stageByName.id)
+    : stageSel.value
+      ? Number(stageSel.value)
+      : null
   if (!stageId) {
     const fallback = (NS_LOOKUPS.stages || []).find(
       (s) => s.status_name === "Email Outreach",
     )
     stageId = fallback ? Number(fallback.id) : null
   }
-  const stageName =
-    canonicalStageName(
-      stageSel.options[stageSel.selectedIndex]?.textContent.trim() || "",
-    ) || "Email Outreach"
 
   const payload = {
     company_name: name,
@@ -8648,7 +8743,8 @@ function leadMonthCount(lead) {
 /**
  * Same Retargeted rules as Pipeline getStage():
  * 2+ months selected or 2+ years aged ⇒ Retargeted;
- * Meeting Scheduled / Not Interested / Prospected kept as-is.
+ * Meeting / Positive, Not Interested & Call kept as-is.
+ * Prospected stays its own stage unless months force Retargeted.
  */
 function getLeadStage(lead) {
   if (!lead) return "Email Outreach"
@@ -8659,10 +8755,7 @@ function getLeadStage(lead) {
     extras.stage ||
     ""
   const keepAsIs =
-    s === "Meeting / Positive" ||
-    s === "Call" ||
-    s === "Not Interested" ||
-    s === "Prospected"
+    s === "Meeting / Positive" || s === "Call" || s === "Not Interested"
   if (keepAsIs) return s
   if (monthsIndicateRetarget(leadMonthList(lead))) return "Retargeted"
   if (s === "Retargeted") return "Email Outreach"
