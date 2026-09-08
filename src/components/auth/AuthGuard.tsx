@@ -19,9 +19,11 @@ export function AuthGuard({ children }: { children: ReactNode }) {
         router.replace("/login")
         return
       }
+      // Don't block the shell on a network round-trip — a stored token is enough
+      // to render, and getCurrentUser() still invalidates a dead session.
+      if (!cancelled) setStatus("ok")
       try {
         await window.NsApi.getCurrentUser()
-        if (!cancelled) setStatus("ok")
       } catch {
         window.NsApi?.clearToken()
         router.replace("/login")

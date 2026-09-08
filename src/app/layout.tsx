@@ -19,13 +19,19 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? ""
+
   return (
     <html lang="en" className={`${inter.variable} h-full antialiased`}>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.__NS_API_BASE__=${JSON.stringify(apiBase)};`,
+          }}
+        />
+      </head>
       <body className="h-full overflow-hidden font-sans">
-        <Script id="ns-api-config" strategy="beforeInteractive">
-          {`window.__NS_API_BASE__ = ${JSON.stringify(process.env.NEXT_PUBLIC_API_URL ?? "")};`}
-        </Script>
-        <Script src="/js/api-client.js?v=lead-deactivate-1" strategy="beforeInteractive" />
+        <Script src="/js/api-client.js?v=api-base-2" strategy="beforeInteractive" />
         <Script
           src="https://cdnjs.cloudflare.com/ajax/libs/sweetalert2/11.10.7/sweetalert2.all.min.js"
           strategy="beforeInteractive"

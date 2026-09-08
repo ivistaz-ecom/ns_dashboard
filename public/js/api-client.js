@@ -1,8 +1,8 @@
 /* eslint-disable */
 /**
  * Thin fetch wrapper around the Core PHP API described in /api/README.md.
- * Reads the base URL from window.__NS_API_BASE__, which AppShell.tsx injects
- * from the NEXT_PUBLIC_API_URL env var (see .env.example).
+ * Reads the base URL from window.__NS_API_BASE__, which layout.tsx injects
+ * from the NEXT_PUBLIC_API_URL env var.
  *
  * This file intentionally does NOT touch dashboard.js's existing in-memory
  * state (customCompanies, potentialLeads, contacts, notes, followUps, etc.) —
@@ -10,9 +10,16 @@
  * save/load functions is the next step once this shape is confirmed to fit.
  */
 (function () {
-  const BASE = (typeof window !== 'undefined' && window.__NS_API_BASE__) || '';
   const TOKEN_KEY = 'ns_auth_token';
   const USER_KEY = 'ns_auth_user';
+
+  function getBase() {
+    try {
+      return String(window.__NS_API_BASE__ || '').replace(/\/+$/, '');
+    } catch (e) {
+      return '';
+    }
+  }
 
   function getToken() {
     try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; }
@@ -31,8 +38,9 @@
   }
 
   async function request(path, options) {
+    const BASE = getBase();
     if (!BASE) {
-      console.warn('[NsApi] window.__NS_API_BASE__ is not set — check NEXT_PUBLIC_API_URL in .env');
+      throw new Error('API URL is not configured. Set NEXT_PUBLIC_API_URL in .env.local and restart the dev server.');
     }
     const token = getToken();
     const headers = { 'Content-Type': 'application/json', ...(options && options.headers) };
@@ -43,7 +51,7 @@
     try {
       body = await res.json();
     } catch (e) {
-      throw new Error('Non-JSON response from ' + path);
+      throw new Error('Non-JSON response from ' + path + ' (' + res.status + ')');
     }
     if (res.status === 401) {
       clearToken();

@@ -410,6 +410,52 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  position: relative;
+}
+
+.dashboard-root .main-stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dashboard-root .html-panel-host {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  flex-direction: column;
+}
+
+.dashboard-root .html-panel-host.is-active,
+.dashboard-root .html-panel-host:has(.panel.active) {
+  display: flex;
+}
+
+.dashboard-root .html-panel-host .panel.active {
+  flex: 1;
+  min-height: 0;
+}
+
+.dashboard-root .dashboard-modals-host {
+  display: block;
+}
+
+.dashboard-root .dashboard-boot-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-base);
+  color: var(--text-subtle);
+  font-size: 0.875rem;
 }
 
 .dashboard-root .main-content.view-pipeline .dashboard-only {
