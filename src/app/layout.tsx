@@ -12,6 +12,11 @@ export const metadata: Metadata = {
   title: "Nautilus BD Dashboard",
   description:
     "Business development dashboard migrated to Next.js and Tailwind CSS",
+  icons: {
+    icon: [{ url: "/favicon-150x150.png", type: "image/png", sizes: "150x150" }],
+    shortcut: "/favicon-150x150.png",
+    apple: "/favicon-150x150.png",
+  },
 }
 
 export default function RootLayout({
