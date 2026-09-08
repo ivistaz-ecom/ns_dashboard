@@ -1,5 +1,31 @@
 /* eslint-disable */
 let RAW_BASE = []
+let indexedRawBase = null
+let companyByIdMap = new Map()
+
+function debounce(fn, ms) {
+  let t = 0
+  return function debounced() {
+    const ctx = this
+    const args = arguments
+    clearTimeout(t)
+    t = setTimeout(function () {
+      fn.apply(ctx, args)
+    }, ms)
+  }
+}
+
+function rebuildCompanyIdIndex() {
+  if (indexedRawBase === RAW_BASE) return
+  indexedRawBase = RAW_BASE
+  companyByIdMap = new Map()
+  RAW_BASE.forEach((r) => {
+    if (!r || r._id == null || r._id === "") return
+    companyByIdMap.set(r._id, r)
+    const num = Number(r._id)
+    if (!Number.isNaN(num)) companyByIdMap.set(num, r)
+  })
+}
 
 /**
  * Pulls company/pipeline rows from the backend API instead of the old
@@ -611,8 +637,9 @@ async function loadFollowUpsFromApi() {
       break
     }
     const items = (res && res.items) || []
+    rebuildCompanyIdIndex()
     items.forEach((fu) => {
-      const row = RAW_BASE.find((r) => r._id === fu.company_id)
+      const row = findCompanyRowById(fu.company_id)
       if (!row) return
       const nk = row.company.toLowerCase().trim()
       followUps[nk] = fu.due_date
@@ -637,8 +664,9 @@ async function loadNotesFromApi() {
       break
     }
     const items = (res && res.items) || []
+    rebuildCompanyIdIndex()
     items.forEach((n) => {
-      const row = RAW_BASE.find((r) => r._id === n.company_id)
+      const row = findCompanyRowById(n.company_id)
       if (!row) return
       const nk = row.company.toLowerCase().trim()
       if (!byCompany[nk]) byCompany[nk] = []
@@ -695,11 +723,11 @@ function formatActivityTime(iso) {
 /** Company row by id, tolerant of string vs number ids across API endpoints. */
 function findCompanyRowById(id) {
   if (id === null || id === undefined || id === "") return null
-  const exact = RAW_BASE.find((r) => r._id === id)
-  if (exact) return exact
+  rebuildCompanyIdIndex()
+  if (companyByIdMap.has(id)) return companyByIdMap.get(id)
   const num = Number(id)
   if (Number.isNaN(num)) return null
-  return RAW_BASE.find((r) => Number(r._id) === num) || null
+  return companyByIdMap.get(num) || null
 }
 
 function mapActivityFromApi(a) {
@@ -1253,31 +1281,38 @@ function rowMatchesStageFilter(r, want) {
 }
 
 function activateTab(t) {
+  const panelId =
+    t === "pipeline" || t === "dashboard" ? "panel-dashboard" : "panel-" + t
+  const panel = document.getElementById(panelId)
+  if (!panel) return
+
   curTab = t === "pipeline" ? "dashboard" : t
   const activeTab = t === "pipeline" ? "pipeline" : t
   document.querySelectorAll(".nav-item[data-tab]").forEach((el) => {
     el.classList.toggle("active", el.dataset.tab === activeTab)
   })
-  document
-    .querySelectorAll(".panel")
-    .forEach((p) => p.classList.remove("active"))
-  const panelId =
-    t === "pipeline" || t === "dashboard" ? "panel-dashboard" : "panel-" + t
-  const panel = document.getElementById(panelId)
-  if (panel) panel.classList.add("active")
+  document.querySelectorAll(".panel").forEach((p) => {
+    p.classList.toggle("active", p === panel)
+  })
+  document.querySelectorAll(".html-panel-host").forEach((h) => {
+    h.classList.toggle("is-active", h.contains(panel))
+  })
   const main = document.getElementById("main-content")
   if (main) main.classList.toggle("view-pipeline", t === "pipeline")
-  if (t === "weekly") renderWeekly()
-  if (t === "leads") {
-    populateLeadFilters()
-    renderLeads()
-  }
-  if (t === "contacts") renderContactsTab()
-  if (t === "analytics") renderAnalytics && renderAnalytics()
-  if (t === "dashboard" || t === "pipeline") {
-    if (typeof populate === "function") populate()
-    if (typeof applyFilters === "function") applyFilters()
-    if (typeof renderDashboardCharts === "function") renderDashboardCharts()
+  try {
+    if (t === "weekly") renderWeekly()
+    if (t === "leads") {
+      populateLeadFilters()
+      renderLeads()
+    }
+    if (t === "contacts") renderContactsTab()
+    if (t === "analytics") renderAnalytics && renderAnalytics()
+    if (t === "dashboard" || t === "pipeline") {
+      if (typeof populate === "function") populate()
+      if (typeof applyFilters === "function") applyFilters()
+    }
+  } catch (err) {
+    console.warn("[dashboard] activateTab render failed:", err)
   }
 }
 
@@ -1651,12 +1686,18 @@ function populate() {
 }
 
 function applyFilters(keepPage) {
+  const searchEl = document.getElementById("search")
+  const fmEl = document.getElementById("fm")
+  const fsEl = document.getElementById("fs")
+  const fcEl = document.getElementById("fc")
+  const fgEl = document.getElementById("fg")
+  if (!searchEl || !fmEl || !fsEl || !fcEl || !fgEl) return
   const all = getAllCompanies()
-  const q = document.getElementById("search").value.toLowerCase()
-  const fm = document.getElementById("fm").value
-  const fs = document.getElementById("fs").value
-  const fc = document.getElementById("fc").value
-  const fg = document.getElementById("fg").value
+  const q = searchEl.value.toLowerCase()
+  const fm = fmEl.value
+  const fs = fsEl.value
+  const fc = fcEl.value
+  const fg = fgEl.value
   // Pre-compute retargeted set: 2+ months selected OR 2+ years aged only.
   const monthsByNk = {}
   all.forEach((r) => {
@@ -1767,8 +1808,12 @@ function applyFilters(keepPage) {
   if (!keepPage) page = 1
   renderTable()
   if (!keepPage) resetPipelineScroll()
-  updateKPIs()
-  renderDashboardCharts()
+  // Search/pipeline filters only need the table. Rebuilding KPIs + 4 SVG
+  // charts on every keystroke is what made search feel frozen.
+  if (isDashboardPage()) {
+    updateKPIs()
+    renderDashboardCharts()
+  }
 }
 
 function applySort() {
@@ -8996,10 +9041,17 @@ function renderLeads() {
   const tf = mgmtEl ? mgmtEl.value : ""
 
   const allRows = getPotentialLeadRows()
+  const leadIdIndex = new Map()
+  potentialLeads.forEach((l, i) => {
+    if (l && l.id != null) leadIdIndex.set(l.id, i)
+  })
   let leads = allRows
     .map((r) => ({
       ...r,
-      _idx: potentialLeads.findIndex((l) => sameLeadId(l.id, r.id)),
+      _idx:
+        r.id != null && leadIdIndex.has(r.id)
+          ? leadIdIndex.get(r.id)
+          : potentialLeads.findIndex((l) => sameLeadId(l.id, r.id)),
     }))
     .filter((r) => {
       if (r._idx < 0) return false
@@ -9117,9 +9169,17 @@ function renderLeads() {
   if (pnext) pnext.disabled = leadPage >= maxPage
 }
 
+const applySearchFilters = debounce(function () {
+  applyFilters()
+}, 180)
+
 ;["search", "fm", "fs", "fg"].forEach((id) => {
   const el = document.getElementById(id)
   if (!el) return
+  if (id === "search") {
+    el.addEventListener("input", applySearchFilters)
+    return
+  }
   el.addEventListener("input", applyFilters)
   el.addEventListener("change", applyFilters)
 })
@@ -9469,6 +9529,14 @@ function importData(e) {
   ])
   RAW_BASE = companies
   potentialLeads = leads
+  indexedRawBase = null
+  renderStageDropOptions()
+  populateConfirmStageOptions()
+  populateLeadFormLookups()
+  populate()
+  if (typeof updatePipelineTrashCount === "function") updatePipelineTrashCount()
+  paintRoute()
+
   await Promise.all([
     loadFollowUpsFromApi(),
     loadNotesFromApi(),
@@ -9477,30 +9545,26 @@ function importData(e) {
   ])
   mergePipelineCommsIntoTracker()
   saveComms()
-  renderStageDropOptions()
-  populateConfirmStageOptions()
-  populate()
-  applyFilters()
-  populateLeadFilters()
-  populateLeadFormLookups()
-  renderLeads()
-  renderDashboardCharts()
-  renderWeekly()
-  updatePipelineTrashCount()
-  // Refresh may activate Contacts before API data is ready — paint again now
-  if (typeof renderContactsTab === "function") renderContactsTab()
+  if (typeof updatePipelineTrashCount === "function") updatePipelineTrashCount()
+  paintRoute()
+})()
+
+function routeTabFromPath() {
   try {
     const path = String(window.location.pathname || "")
-    if (path.indexOf("/contacts") !== -1) activateTab("contacts")
-    else if (path.indexOf("/leads") !== -1) activateTab("leads")
-    else if (path.indexOf("/weekly") !== -1) activateTab("weekly")
-    else if (path.indexOf("/analytics") !== -1) activateTab("analytics")
-    else if (path.indexOf("/settings") !== -1) activateTab("settings")
-    else if (path.indexOf("/pipeline") !== -1) activateTab("pipeline")
-  } catch (err) {
-    console.warn("[dashboard] post-init tab activate failed:", err)
-  }
-})()
+    if (path.indexOf("/contacts") !== -1) return "contacts"
+    if (path.indexOf("/leads") !== -1) return "leads"
+    if (path.indexOf("/weekly") !== -1) return "weekly"
+    if (path.indexOf("/analytics") !== -1) return "analytics"
+    if (path.indexOf("/settings") !== -1) return "settings"
+    if (path.indexOf("/pipeline") !== -1) return "pipeline"
+  } catch (err) {}
+  return "dashboard"
+}
+
+function paintRoute() {
+  activateTab(routeTabFromPath())
+}
 const cfDate = document.getElementById("cf-date")
 if (cfDate) cfDate.value = new Date().toISOString().slice(0, 10)
 
@@ -9509,6 +9573,8 @@ window.pickFieldEditValue = pickFieldEditValue
 window.closeFieldEditPop = closeFieldEditPop
 window.openFieldEdit = openFieldEdit
 window.renderLeads = renderLeads
+window.renderLeadsDebounced = debounce(renderLeads, 180)
+window.renderContactsTabDebounced = debounce(renderContactsTab, 180)
 window.setLeadsView = setLeadsView
 window.sortLeads = sortLeads
 window.clearLeadFilters = clearLeadFilters

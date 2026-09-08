@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useEffect } from "react"
+import { memo, useEffect, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { tabFromPath, navItems, type NavTab } from "@/config/nav"
 import { Sidebar } from "@/components/layout/Sidebar"
@@ -13,7 +13,7 @@ import { ContactsPanel } from "@/components/contacts/ContactsPanel"
 import { SettingsPanel } from "@/components/settings/SettingsPanel"
 import { DashboardModals } from "@/components/shared/DashboardModals"
 
-const DASHBOARD_JS = "/js/dashboard.js?v=call-kpi-match-9"
+const DASHBOARD_JS = "/js/dashboard.js?v=perf-boot-1"
 
 declare global {
   interface Window {
@@ -53,45 +53,62 @@ function activateDashboardTab(tab: NavTab) {
   }
 }
 
+function dashboardScriptReady() {
+  return typeof window.__nsActivateTab === "function"
+}
+
 export function AppShell() {
   const pathname = usePathname()
   const router = useRouter()
   const activeTab: NavTab = tabFromPath(pathname)
+  const [scriptReady, setScriptReady] = useState(false)
 
   useEffect(() => {
     window.__nsNavigate = (tab: string) => {
       const item = navItems.find((n) => n.tab === tab)
       if (item) router.push(item.href)
     }
-    activateDashboardTab(activeTab)
-  }, [activeTab, router])
+  }, [router])
 
-  // Load dashboard.js once — Next <Script> remounts re-declare `let` and crash.
   useEffect(() => {
-    if (window.__NS_DASHBOARD_BOOTED__) {
+    let alive = true
+
+    function onReady() {
+      window.__NS_DASHBOARD_BOOTED__ = true
+      if (!alive) return
+      setScriptReady(true)
       activateDashboardTab(activeTab)
-      return
-    }
-    if (window.__NS_DASHBOARD_LOADING__) return
-    if (document.getElementById("ns-dashboard-js")) {
-      window.__NS_DASHBOARD_LOADING__ = true
-      return
     }
 
-    window.__NS_DASHBOARD_LOADING__ = true
-    const script = document.createElement("script")
-    script.id = "ns-dashboard-js"
-    script.src = DASHBOARD_JS
-    script.async = true
-    script.onload = () => {
-      window.__NS_DASHBOARD_BOOTED__ = true
-      activateDashboardTab(activeTab)
+    if (dashboardScriptReady()) {
+      onReady()
+      return () => {
+        alive = false
+      }
     }
-    script.onerror = () => {
-      window.__NS_DASHBOARD_LOADING__ = false
-      console.error("[AppShell] failed to load", DASHBOARD_JS)
+
+    let script = document.getElementById(
+      "ns-dashboard-js"
+    ) as HTMLScriptElement | null
+    if (!script) {
+      script = document.createElement("script")
+      script.id = "ns-dashboard-js"
+      script.src = DASHBOARD_JS
+      script.async = true
+      script.onerror = () => {
+        window.__NS_DASHBOARD_LOADING__ = false
+        console.error("[AppShell] failed to load", DASHBOARD_JS)
+      }
+      document.body.appendChild(script)
     }
-    document.body.appendChild(script)
+
+    script.addEventListener("load", onReady)
+    if (dashboardScriptReady()) onReady()
+
+    return () => {
+      alive = false
+      script?.removeEventListener("load", onReady)
+    }
   }, [activeTab])
 
   return (
@@ -100,7 +117,14 @@ export function AppShell() {
         <Sidebar activeTab={activeTab} />
         <div className="main-area">
           <Topbar />
-          <MainPanels />
+          <div className="main-stage">
+            <MainPanels />
+            {!scriptReady && (
+              <div className="dashboard-boot-mask" role="status">
+                Loading dashboard…
+              </div>
+            )}
+          </div>
         </div>
       </div>
       <DashboardModals />
